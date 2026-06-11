@@ -36,9 +36,20 @@ final class ConnectionManager {
     /// Xray core log verbosity.
     var logLevel: LogLevel = .warning
 
+    /// Auto-reconnect when the link silently dies (NAT/firewall idle timeout).
+    var autoReconnect: Bool = true
+
     private let xray = XrayProcess()
     private var activeMode: TunnelMode = .systemProxy
     private var uptimeTimer: Timer?
+
+    /// The server we're currently connected to, kept so the watchdog can
+    /// transparently restart the tunnel without user input.
+    private var activeServer: ProxyConfig?
+    private var watchdogTask: Task<Void, Never>?
+    /// True while a watchdog-driven reconnect is in flight, so the UI doesn't
+    /// flicker through .connecting and the uptime clock isn't reset.
+    private var isReconnecting = false
 
     init() {
         xray.onLog = { [weak self] line in
@@ -47,7 +58,12 @@ final class ConnectionManager {
         xray.onExit = { [weak self] code in
             Task { @MainActor in
                 guard let self else { return }
-                if self.state == .connected || self.state == .connecting {
+                // Ignore exits we triggered ourselves (stop/restart).
+                guard self.state == .connected || self.state == .connecting else { return }
+                if self.autoReconnect, self.activeServer != nil {
+                    self.appendLog("[warn] xray exited (code \(code)) — reconnecting\n")
+                    self.reconnect()
+                } else {
                     self.teardownTransport()
                     self.state = .failed("xray exited (code \(code))")
                     self.stopUptime()
@@ -65,6 +81,7 @@ final class ConnectionManager {
         let wasConnected = (state == .connected || state == .connecting)
         let keepTransport = wasConnected && (activeMode == mode)
 
+        activeServer = server
         if wasConnected && !keepTransport {
             // Mode actually changed → full teardown.
             teardownTransport()
@@ -76,7 +93,7 @@ final class ConnectionManager {
             return
         }
         state = .connecting
-        logs = ""
+        if !isReconnecting { logs = "" }
         activeServerName = server.name
         appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title))\n")
 
@@ -181,10 +198,14 @@ final class ConnectionManager {
         activeServerID = serverID
         activeMode = mode
         state = .connected
-        startUptime()
+        isReconnecting = false
+        if connectedSince == nil { startUptime() }
+        startWatchdog()
     }
 
     func disconnect() {
+        stopWatchdog()
+        activeServer = nil
         teardownTransport()
         xray.stop()
         activeServerID = nil
@@ -201,9 +222,66 @@ final class ConnectionManager {
     }
 
     private func fail(_ message: String) {
+        isReconnecting = false
         state = .failed(message)
         appendLog("[error] \(message)\n")
         stopUptime()
+    }
+
+    // MARK: - Watchdog / auto-reconnect
+
+    /// Restarts the tunnel for the active server without tearing down the
+    /// transport or resetting the uptime clock. Used by the watchdog and by the
+    /// xray.onExit handler when the link dies unexpectedly.
+    private func reconnect() {
+        guard let server = activeServer else { return }
+        isReconnecting = true
+        // connect() keeps the transport up when the mode is unchanged, so this
+        // just relaunches xray and re-pins the route — sub-second, no prompts.
+        connect(to: server)
+    }
+
+    /// Periodically probes end-to-end connectivity through the SOCKS proxy and
+    /// silently reconnects if the link has gone dead (e.g. NAT idle timeout,
+    /// where xray stays alive but no traffic flows).
+    private func startWatchdog() {
+        watchdogTask?.cancel()
+        guard autoReconnect else { return }
+        let host = ports.listen
+        let socksPort = ports.socks
+        watchdogTask = Task { [weak self] in
+            // Number of consecutive failed probes before forcing a reconnect.
+            let maxFailures = 2
+            var failures = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30s
+                if Task.isCancelled { return }
+                guard let self else { return }
+                // Only probe while we believe we're connected and idle.
+                let busy = await MainActor.run { self.state != .connected || self.isReconnecting }
+                if busy { failures = 0; continue }
+
+                let alive = await HealthProbe.throughSocks(host: host, port: socksPort)
+                if alive {
+                    failures = 0
+                    continue
+                }
+                failures += 1
+                if failures >= maxFailures {
+                    failures = 0
+                    await MainActor.run {
+                        guard self.state == .connected, !self.isReconnecting else { return }
+                        self.appendLog("[warn] health check failed — reconnecting\n")
+                        self.reconnect()
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopWatchdog() {
+        watchdogTask?.cancel()
+        watchdogTask = nil
     }
 
     // MARK: - Uptime

@@ -160,8 +160,15 @@ enum XrayConfigBuilder {
     private static func streamSettings(_ cfg: ProxyConfig) -> [String: Any] {
         var settings: [String: Any] = [
             "network": cfg.network.rawValue,
-            // Disable Nagle's algorithm — lower latency for interactive traffic.
-            "sockopt": ["tcpNoDelay": true]
+            "sockopt": [
+                // Disable Nagle's algorithm — lower latency for interactive traffic.
+                "tcpNoDelay": true,
+                // Enable TCP keepalive on the link to the server so idle
+                // connections don't get silently dropped from NAT/firewall
+                // translation tables (the usual cause of long-idle disconnects).
+                "tcpKeepAliveIdle": 30,
+                "tcpKeepAliveInterval": 15
+            ]
         ]
 
         // Security layer
