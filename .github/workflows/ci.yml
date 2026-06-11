@@ -16,6 +16,11 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
+      - name: Fetch core binaries
+        run: |
+          Scripts/fetch-xray.sh
+          Scripts/fetch-tun2socks.sh
+
       - name: Build
         run: swift build
 
