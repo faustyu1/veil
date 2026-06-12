@@ -1,11 +1,46 @@
 import Foundation
 
+/// Safe replacement for the SPM-synthesized `Bundle.module`.
+///
+/// `Bundle.module` is a `static let` whose initializer calls `fatalError(…)`
+/// when the `XrayClient_XrayClient.bundle` resource bundle can't be located —
+/// so *merely accessing it* hard-crashes the app (e.g. when the .app is run
+/// from a copy/volume where the resource bundle didn't come along). This finder
+/// performs the same candidate search but returns `nil` instead of trapping.
+enum ResourceBundle {
+    private final class BundleFinder {}
+
+    static let module: Bundle? = {
+        let bundleName = "XrayClient_XrayClient"
+
+        var candidates = [
+            Bundle.main.resourceURL,
+            Bundle(for: BundleFinder.self).resourceURL,
+            Bundle.main.bundleURL,
+        ]
+
+        // Bundle next to the running executable (handy for `swift run`).
+        let exeDir = URL(fileURLWithPath: CommandLine.arguments[0])
+            .deletingLastPathComponent()
+        candidates.append(exeDir)
+        candidates.append(exeDir.deletingLastPathComponent())
+
+        for candidate in candidates {
+            let url = candidate?.appendingPathComponent(bundleName + ".bundle")
+            if let url, let bundle = Bundle(url: url) {
+                return bundle
+            }
+        }
+        return nil
+    }()
+}
+
 /// Locates a bundled (or system) core executable by name.
 enum CoreBinary {
     /// Finds an executable named `name` (e.g. "xray" or "sing-box").
     static func locate(_ name: String) -> URL? {
-        // 1. SPM resource bundle (Bundle.module) — where `.copy("Resources/…")` lands.
-        if let resourceURL = Bundle.module.url(forResource: name, withExtension: nil) {
+        // 1. SPM resource bundle — where `.copy("Resources/…")` lands.
+        if let resourceURL = ResourceBundle.module?.url(forResource: name, withExtension: nil) {
             return resourceURL
         }
         // 2. Main bundle (in case resources are flattened into the app bundle).

@@ -29,7 +29,7 @@ enum TunManager {
     // MARK: - Resource lookup
 
     private static func resource(_ name: String) -> URL? {
-        if let url = Bundle.module.url(forResource: name, withExtension: nil) { return url }
+        if let url = ResourceBundle.module?.url(forResource: name, withExtension: nil) { return url }
         return Bundle.main.url(forResource: name, withExtension: nil)
     }
 
