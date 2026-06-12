@@ -19,6 +19,7 @@ jobs:
       - name: Fetch core binaries
         run: |
           Scripts/fetch-xray.sh
+          Scripts/fetch-singbox.sh
           Scripts/fetch-tun2socks.sh
 
       - name: Build

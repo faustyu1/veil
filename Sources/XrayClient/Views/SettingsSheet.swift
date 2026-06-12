@@ -122,6 +122,16 @@ struct SettingsSheet: View {
                         .onChange(of: store.settings.closeToTray) { _, _ in store.save() }
                     Toggle(loc("Auto-connect on launch"), isOn: $store.settings.autoConnectOnLaunch)
                         .onChange(of: store.settings.autoConnectOnLaunch) { _, _ in store.save() }
+                    Toggle(loc("Launch at login"), isOn: $store.settings.launchAtLogin)
+                        .onChange(of: store.settings.launchAtLogin) { _, on in
+                            LoginItem.setEnabled(on); store.save()
+                        }
+                    Toggle(loc("Notify on connect / disconnect"), isOn: $store.settings.notifyOnConnect)
+                        .onChange(of: store.settings.notifyOnConnect) { _, on in
+                            connection.notifyOnConnect = on
+                            if on { NotificationManager.requestAuthorization() }
+                            store.save()
+                        }
                 }
             }
             .formStyle(.grouped)

@@ -39,6 +39,9 @@ final class ConnectionManager {
     /// Auto-reconnect when the link silently dies (NAT/firewall idle timeout).
     var autoReconnect: Bool = true
 
+    /// Post a macOS notification on connect / disconnect / reconnect events.
+    var notifyOnConnect: Bool = false
+
     private let xray = XrayProcess()
     private var activeMode: TunnelMode = .systemProxy
     private var uptimeTimer: Timer?
@@ -88,21 +91,33 @@ final class ConnectionManager {
         }
         xray.stop()
 
-        guard let binary = XrayBinary.locate() else {
-            fail("xray binary not found. Run Scripts/fetch-xray.sh")
+        guard let binary = CoreBinary.locate(for: server.engine) else {
+            let missing = server.engine == .singbox ? "sing-box" : "xray"
+            let script = server.engine == .singbox ? "fetch-singbox.sh" : "fetch-xray.sh"
+            fail("\(missing) binary not found. Run Scripts/\(script)")
             return
         }
         state = .connecting
         if !isReconnecting { logs = "" }
         activeServerName = server.name
-        appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title))\n")
+        let coreName = server.engine == .singbox ? "sing-box" : "xray"
+        appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title), \(coreName))\n")
 
         do {
-            let data = try XrayConfigBuilder.jsonData(for: server, ports: ports,
+            let data: Data
+            switch server.engine {
+            case .xray:
+                data = try XrayConfigBuilder.jsonData(for: server, ports: ports,
                                                       rules: routingRules,
                                                       logLevel: logLevel.rawValue)
-            // Point xray at the geo .dat dir only when rules reference geosite/geoip.
-            let needsGeo = routingRules.contains { rule in
+            case .singbox:
+                data = try SingBoxConfigBuilder.jsonData(for: server, ports: ports,
+                                                         rules: routingRules,
+                                                         logLevel: logLevel.rawValue)
+            }
+            // Point the core at the geo .dat dir only when Xray rules reference
+            // geosite/geoip (sing-box doesn't use this env).
+            let needsGeo = server.engine == .xray && routingRules.contains { rule in
                 rule.domains.contains { $0.hasPrefix("geosite:") }
                     || rule.ips.contains { $0.hasPrefix("geoip:") }
             }
@@ -195,15 +210,23 @@ final class ConnectionManager {
     }
 
     private func finishConnect(serverID: UUID, mode: TunnelMode) {
+        let wasReconnecting = isReconnecting
         activeServerID = serverID
         activeMode = mode
         state = .connected
         isReconnecting = false
         if connectedSince == nil { startUptime() }
         startWatchdog()
+        if notifyOnConnect {
+            NotificationManager.notify(
+                title: wasReconnecting ? "Reconnected" : "Connected",
+                body: activeServerName)
+        }
     }
 
     func disconnect() {
+        let wasConnected = (state == .connected)
+        let name = activeServerName
         stopWatchdog()
         activeServer = nil
         teardownTransport()
@@ -212,6 +235,9 @@ final class ConnectionManager {
         state = .disconnected
         stopUptime()
         appendLog("[info] disconnected\n")
+        if notifyOnConnect && wasConnected {
+            NotificationManager.notify(title: "Disconnected", body: name)
+        }
     }
 
     private func teardownTransport() {

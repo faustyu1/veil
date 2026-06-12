@@ -6,11 +6,14 @@ A native macOS VPN client for the [Xray-core](https://github.com/XTLS/Xray-core)
 
 ## Features
 
-- **Protocols** — VLESS, VMess, Trojan, Shadowsocks. Reality & TLS security. `tcp`, `ws`, `grpc`, `http` transports. XTLS `xtls-rprx-vision` flow.
+- **Protocols (two cores)**
+  - **Xray-core** — VLESS, VMess, Trojan, Shadowsocks. Reality & TLS security. `tcp`, `ws`, `grpc`, `http`, `xhttp` transports. XTLS `xtls-rprx-vision` flow. VLESS post-quantum encryption (ML-KEM-768 + X25519).
+  - **sing-box** — Hysteria2, TUIC, WireGuard, AnyTLS (QUIC-based & modern protocols Xray can't handle). The right core is chosen automatically per server.
 - **Two tunnel modes**
   - **System Proxy** — sets the macOS SOCKS/HTTP proxy. No admin password. Covers browsers and proxy-aware apps.
   - **TUN (all apps)** — routes *everything* (Telegram, terminal, games, UDP) through [tun2socks](https://github.com/xjasonlyu/tun2socks). A one-time privileged helper install means server switches never ask for a password again.
 - **Subscriptions** — import subscription URLs; each becomes its own profile group. Reads `Subscription-Userinfo` (traffic & expiry), `Profile-Title` (name) and `Announce` (description) headers. Auto-update on a configurable interval.
+- **QR codes** — show any server as a QR code (copy link or save PNG), and import servers by scanning a QR with the camera or decoding it from an image file.
 - **Professional routing** (v2rayN / Nekoray style)
   - Presets: **Global**, **Bypass LAN**, **Bypass China**, **Bypass Russia**, **Custom**.
   - Downloadable `geosite.dat` / `geoip.dat` rule databases from GitHub (Loyalsoldier, runetfreedom, v2fly, or a custom URL).
@@ -19,6 +22,7 @@ A native macOS VPN client for the [Xray-core](https://github.com/XTLS/Xray-core)
 - **Fast switching** — switching servers in the same mode keeps the transport up and only restarts the core, re-pinning the route. Sub-second, no password prompt.
 - **Latency testing** — TCP-connect ping per server or per group, with host-route bypass while TUN is active. Sort by ping, filter to alive-only, search.
 - **Menu-bar control** — connect / disconnect and quick-switch servers without opening the window.
+- **System integration** — launch at login (via `SMAppService`) and macOS notifications on connect / disconnect / reconnect.
 - **Quality of life** — collapsible groups, click-to-connect, multi-select deletion (active server is protected), close-to-tray, auto-connect on launch, configurable SOCKS/HTTP ports and core log level, light/dark/system themes.
 - **Localized** in 12 languages: English, Русский, 中文, Español, हिन्दी, العربية, Français, Português, Deutsch, 日本語, Bahasa Indonesia, Türkçe.
 - **Safe shutdown** — restores routes/DNS on quit and recovers from a crashed previous session so you're never left without internet.
@@ -43,6 +47,7 @@ cd veil
 
 # Fetch the bundled cores (architecture detected automatically)
 Scripts/fetch-xray.sh
+Scripts/fetch-singbox.sh
 Scripts/fetch-tun2socks.sh
 
 # Optional: regenerate the app icon
@@ -60,11 +65,11 @@ Scripts/run-app.sh release
 swift test
 ```
 
-Covers the share-link parsers (VLESS/VMess/Trojan/SS) and the Xray config builder.
+Covers the share-link parsers (VLESS/VMess/Trojan/SS/Hysteria2/TUIC/AnyTLS/WireGuard), the link builder (round-trip), and both the Xray and sing-box config builders.
 
 ## Usage
 
-1. **Add servers** — *Subscription* to import a subscription URL, or *Add Link* to paste `vless://` / `vmess://` / `trojan://` / `ss://` links (one per line).
+1. **Add servers** — *Subscription* to import a subscription URL, or *Add Link* to paste `vless://` / `vmess://` / `trojan://` / `ss://` / `hysteria2://` / `tuic://` / `anytls://` / `wireguard://` links (one per line). You can also import from a QR code (image file or camera).
 2. **Pick a mode** — *Proxy* for browsers, *TUN* for everything. The first TUN connection installs a small root-owned helper via a single password prompt.
 3. **Connect** — click a server to select (and connect/switch). The connect button and menu-bar item act on the remembered server.
 4. **Routing** — *Settings → Routing → Configure…*. Choose a preset or build custom rules. Geo-based presets download the rule database on first use.
@@ -73,8 +78,9 @@ Covers the share-link parsers (VLESS/VMess/Trojan/SS) and the Xray config builde
 
 ```
 SwiftUI app (Veil)
- ├─ Xray-core (subprocess)         SOCKS + HTTP inbounds on 127.0.0.1
- │    └─ your server outbound + direct/block, routing rules
+ ├─ Xray-core (subprocess)         VLESS/VMess/Trojan/SS — SOCKS + HTTP inbounds on 127.0.0.1
+ ├─ sing-box (subprocess)          Hysteria2/TUIC/WireGuard/AnyTLS — same SOCKS + HTTP inbounds
+ │    └─ your server outbound + direct/block, routing rules (core chosen per server)
  ├─ System Proxy mode              networksetup points the active service at the SOCKS/HTTP ports
  └─ TUN mode                       tun2socks utun device + split-default routes (0/1 + 128/1),
                                     server IP pinned to the physical gateway
@@ -90,19 +96,21 @@ SwiftUI app (Veil)
 Sources/XrayClient/
   App.swift                 app entry, menu-bar extra, lifecycle
   Models/                   ProxyConfig, Subscription, AppSettings, Routing
-  Core/                     LinkParser, SubscriptionFetcher, XrayConfigBuilder,
-                            XrayProcess, SystemProxy, TunManager, ConnectionManager,
-                            ServerStore, PingTester, GeoAssetManager, Localization
+  Core/                     LinkParser, LinkBuilder, QRCode, SubscriptionFetcher,
+                            XrayConfigBuilder, SingBoxConfigBuilder, XrayProcess,
+                            SystemProxy, TunManager, ConnectionManager, ServerStore,
+                            PingTester, GeoAssetManager, SystemIntegration, Localization
   Views/                    ContentView, MenuBarContent, SettingsSheet, RoutingSheet,
-                            AddServerSheet
-  Resources/                xray, tun2socks (fetched), helper shell scripts
+                            AddServerSheet, QRDisplaySheet, CameraScannerView
+  Resources/                xray, sing-box, tun2socks (fetched), helper shell scripts
 Scripts/                    fetch-*, run-app.sh, make-icon.sh, tun-*, *-helper.sh
-Tests/                      parser & config-builder tests
+Tests/                      parser, link-builder & config-builder tests
 ```
 
 ## Acknowledgements
 
-- [XTLS/Xray-core](https://github.com/XTLS/Xray-core) — the proxy engine
+- [XTLS/Xray-core](https://github.com/XTLS/Xray-core) — VLESS/VMess/Trojan/SS proxy engine
+- [SagerNet/sing-box](https://github.com/SagerNet/sing-box) — Hysteria2/TUIC/WireGuard/AnyTLS engine
 - [xjasonlyu/tun2socks](https://github.com/xjasonlyu/tun2socks) — TUN ↔ SOCKS
 - Rule databases: [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat), [runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat), [v2fly](https://github.com/v2fly)
 

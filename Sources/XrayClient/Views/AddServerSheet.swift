@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Sheet for adding one or more servers by pasting share links (into Manual group).
 struct AddServerSheet: View {
@@ -7,17 +8,33 @@ struct AddServerSheet: View {
 
     @State private var linkText = ""
     @State private var errorMessage: String?
+    @State private var showScanner = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Add Server(s)").font(.title2).bold()
-            Text("Paste one or more links (vless://, vmess://, trojan://, ss://). One per line.")
+            Text("Paste one or more links (vless://, vmess://, trojan://, ss://, hysteria2://, tuic://, anytls://, wireguard://). One per line. Or import from a QR code.")
                 .font(.caption).foregroundStyle(.secondary)
 
             TextEditor(text: $linkText)
                 .font(.system(.body, design: .monospaced))
                 .frame(minHeight: 120)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+
+            HStack(spacing: 8) {
+                Button {
+                    importFromImage()
+                } label: {
+                    Label("From image…", systemImage: "qrcode")
+                }
+                Button {
+                    showScanner = true
+                } label: {
+                    Label("Scan camera", systemImage: "camera")
+                }
+                Spacer()
+            }
+            .controlSize(.small)
 
             if let errorMessage {
                 Text(errorMessage).font(.caption).foregroundStyle(.red)
@@ -31,6 +48,35 @@ struct AddServerSheet: View {
             }
         }
         .padding().frame(width: 480)
+        .sheet(isPresented: $showScanner) {
+            ScannerSheet { scanned in
+                appendScanned(scanned)
+                showScanner = false
+            }
+        }
+    }
+
+    /// Opens an image file and decodes a QR-code link from it.
+    private func importFromImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .image]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let payload = QRCode.decode(fileURL: url) else {
+            errorMessage = "No QR code found in that image."
+            return
+        }
+        appendScanned(payload)
+    }
+
+    /// Appends a scanned/decoded payload to the text box (newline-separated).
+    private func appendScanned(_ payload: String) {
+        errorMessage = nil
+        if linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            linkText = payload
+        } else {
+            linkText += "\n" + payload
+        }
     }
 
     private func addServers() {
@@ -41,6 +87,24 @@ struct AddServerSheet: View {
         }
         store.addManualServers(parsed)
         dismiss()
+    }
+}
+
+/// A small sheet wrapping the live camera scanner.
+struct ScannerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var onScan: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Point the camera at a QR code").font(.headline)
+            CameraScannerView { value in onScan(value) }
+                .frame(width: 360, height: 270)
+                .cornerRadius(10)
+            Button("Cancel") { dismiss() }
+        }
+        .padding(16)
+        .frame(width: 400)
     }
 }
 

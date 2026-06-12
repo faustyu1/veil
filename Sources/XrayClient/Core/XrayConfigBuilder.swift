@@ -65,6 +65,11 @@ enum XrayConfigBuilder {
         case .vmess:        out = vmessOutbound(cfg)
         case .trojan:       out = trojanOutbound(cfg)
         case .shadowsocks:  out = shadowsocksOutbound(cfg)
+        case .hysteria2, .tuic, .wireguard, .anytls:
+            // Handled by the sing-box core, never here. ConnectionManager routes
+            // them to SingBoxConfigBuilder; this is only reachable if called
+            // directly, so emit a harmless freedom outbound.
+            out = ["tag": "proxy", "protocol": "freedom", "settings": [:]]
         }
         if let mux = muxSettings(cfg) { out["mux"] = mux }
         return out
@@ -201,6 +206,14 @@ enum XrayConfigBuilder {
                 h["host"] = [host]
             }
             settings["httpSettings"] = h
+        case .xhttp:
+            var x: [String: Any] = ["path": cfg.path ?? "/"]
+            if let host = cfg.host, !host.isEmpty { x["host"] = host }
+            if let mode = cfg.xhttpMode, !mode.isEmpty { x["mode"] = mode }
+            if let pad = cfg.xPaddingBytes, !pad.isEmpty {
+                x["extra"] = ["xPaddingBytes": pad]
+            }
+            settings["xhttpSettings"] = x
         case .tcp, .kcp, .quic:
             break
         }

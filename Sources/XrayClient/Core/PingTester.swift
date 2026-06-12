@@ -107,12 +107,14 @@ final class PingTester {
         }
         if errno != EINPROGRESS { return nil }
 
-        var writeSet = fd_set()
-        fdZero(&writeSet)
-        fdSet(fd, &writeSet)
-        var tv = timeval(tv_sec: Int(timeout), tv_usec: Int32((timeout - floor(timeout)) * 1_000_000))
-
-        let sel = select(fd + 1, nil, &writeSet, nil, &tv)
+        // Wait for the socket to become writable (connect completes) using
+        // poll(). poll() — unlike select()/fd_set — has no FD_SETSIZE (1024)
+        // limit, so it is safe when many sockets are open concurrently (the
+        // select() path used to trap with a buffer overrun once a socket fd
+        // climbed past 1023, e.g. during concurrent ping tests).
+        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        let timeoutMs = Int32(max(0, (timeout * 1000).rounded()))
+        let sel = poll(&pfd, 1, timeoutMs)
         guard sel > 0 else { return nil } // timeout or error
 
         // Confirm the connection actually succeeded.
@@ -128,23 +130,5 @@ final class PingTester {
         let ns = DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds
         // Round to nearest ms, but never report 0 for a successful connect.
         return max(1, Int((Double(ns) / 1_000_000.0).rounded()))
-    }
-}
-
-// MARK: - fd_set helpers (Darwin doesn't expose FD_SET/FD_ZERO to Swift)
-
-private func fdZero(_ set: inout fd_set) {
-    set.fds_bits = (0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-                    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
-}
-
-private func fdSet(_ fd: Int32, _ set: inout fd_set) {
-    let intOffset = Int(fd) / 32
-    let bitOffset = Int(fd) % 32
-    let mask = Int32(1 << bitOffset)
-    withUnsafeMutablePointer(to: &set.fds_bits) { ptr in
-        ptr.withMemoryRebound(to: Int32.self, capacity: 32) { bits in
-            bits[intOffset] |= mask
-        }
     }
 }

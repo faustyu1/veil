@@ -1,31 +1,46 @@
 import Foundation
 
-/// Locates the bundled (or system) `xray` executable.
-enum XrayBinary {
-    static func locate() -> URL? {
-        // 1. SPM resource bundle (Bundle.module) — where `.copy("Resources/xray")` lands.
-        if let resourceURL = Bundle.module.url(forResource: "xray", withExtension: nil) {
+/// Locates a bundled (or system) core executable by name.
+enum CoreBinary {
+    /// Finds an executable named `name` (e.g. "xray" or "sing-box").
+    static func locate(_ name: String) -> URL? {
+        // 1. SPM resource bundle (Bundle.module) — where `.copy("Resources/…")` lands.
+        if let resourceURL = Bundle.module.url(forResource: name, withExtension: nil) {
             return resourceURL
         }
         // 2. Main bundle (in case resources are flattened into the app bundle).
-        if let resourceURL = Bundle.main.url(forResource: "xray", withExtension: nil) {
+        if let resourceURL = Bundle.main.url(forResource: name, withExtension: nil) {
             return resourceURL
         }
-        // 2. Next to the running binary (handy for `swift run`).
+        // 3. Next to the running binary (handy for `swift run`).
         let exeDir = URL(fileURLWithPath: CommandLine.arguments[0])
             .deletingLastPathComponent()
-        let sibling = exeDir.appendingPathComponent("xray")
+        let sibling = exeDir.appendingPathComponent(name)
         if FileManager.default.isExecutableFile(atPath: sibling.path) {
             return sibling
         }
-        // 3. A few common install locations / PATH fallbacks.
-        for candidate in ["/usr/local/bin/xray", "/opt/homebrew/bin/xray"] {
+        // 4. A few common install locations / PATH fallbacks.
+        for dir in ["/usr/local/bin", "/opt/homebrew/bin"] {
+            let candidate = "\(dir)/\(name)"
             if FileManager.default.isExecutableFile(atPath: candidate) {
                 return URL(fileURLWithPath: candidate)
             }
         }
         return nil
     }
+
+    /// Resolves the executable for a given core engine.
+    static func locate(for engine: CoreEngine) -> URL? {
+        switch engine {
+        case .xray:    return locate("xray")
+        case .singbox: return locate("sing-box")
+        }
+    }
+}
+
+/// Locates the bundled (or system) `xray` executable.
+enum XrayBinary {
+    static func locate() -> URL? { CoreBinary.locate("xray") }
 }
 
 /// Manages the lifecycle of the `xray` core subprocess and streams its logs.

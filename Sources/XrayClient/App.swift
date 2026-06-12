@@ -26,8 +26,14 @@ struct XrayClientApp: App {
                     connection.logLevel = store.settings.logLevel
                     connection.ports.socks = store.settings.socksPort
                     connection.ports.http = store.settings.httpPort
+                    connection.notifyOnConnect = store.settings.notifyOnConnect
                     appDelegate.closeToTray = store.settings.closeToTray
                     appDelegate.connection = connection
+                    // Keep the login-item registration in sync with the setting.
+                    LoginItem.setEnabled(store.settings.launchAtLogin)
+                    if store.settings.notifyOnConnect {
+                        NotificationManager.requestAuthorization()
+                    }
                     // Recover from a previous crash/force-quit that left the
                     // tunnel routes in place (which kills internet).
                     TunManager.emergencyCleanup()

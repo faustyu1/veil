@@ -71,6 +71,10 @@ struct AppSettings: Codable, Equatable {
 
     // Startup
     var autoConnectOnLaunch: Bool = false
+    var launchAtLogin: Bool = false
+
+    // Notifications
+    var notifyOnConnect: Bool = false
 
     init() {}
 
@@ -98,6 +102,8 @@ struct AppSettings: Codable, Equatable {
         customGeoipURL = get(.customGeoipURL, "")
         customGeositeURL = get(.customGeositeURL, "")
         autoConnectOnLaunch = get(.autoConnectOnLaunch, false)
+        launchAtLogin = get(.launchAtLogin, false)
+        notifyOnConnect = get(.notifyOnConnect, false)
     }
 
     /// The ordered routing rules to feed Xray, derived from the active preset

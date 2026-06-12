@@ -1,11 +1,22 @@
 import Foundation
 
-/// Supported proxy protocols, mirroring what Xray-core can handle.
+/// Supported proxy protocols. VLESS/VMess/Trojan/SS run on the Xray core;
+/// Hysteria2/TUIC are QUIC-based and run on the sing-box core.
 enum ProxyProtocol: String, Codable, CaseIterable {
     case vless
     case vmess
     case trojan
     case shadowsocks = "ss"
+    case hysteria2
+    case tuic
+    case wireguard
+    case anytls
+}
+
+/// Which bundled core engine drives a given protocol.
+enum CoreEngine {
+    case xray
+    case singbox
 }
 
 /// Transport-layer network used by the outbound stream.
@@ -16,6 +27,7 @@ enum TransportNetwork: String, Codable {
     case http
     case kcp
     case quic
+    case xhttp
 }
 
 /// Security applied on top of the transport.
@@ -63,6 +75,34 @@ struct ProxyConfig: Codable, Identifiable, Equatable {
     var path: String?
     var host: String?          // ws/http Host header
     var serviceName: String?   // grpc
+
+    // xhttp specifics
+    var xhttpMode: String?     // "auto" | "packet-up" | "stream-up" | "stream-one"
+    var xPaddingBytes: String? // e.g. "100-1000"
+
+    // Hysteria2 / TUIC (sing-box core)
+    var obfs: String?              // hysteria2 obfs type, e.g. "salamander"
+    var obfsPassword: String?      // hysteria2 obfs password
+    var congestionControl: String? // tuic: "bbr" | "cubic" | "new_reno"
+    var udpRelayMode: String?      // tuic: "native" | "quic"
+    var upMbps: Int?               // hysteria2 optional bandwidth hint
+    var downMbps: Int?
+
+    // WireGuard (sing-box endpoint)
+    var privateKey: String?        // wireguard local private key (base64)
+    var peerPublicKey: String?     // wireguard peer public key (base64)
+    var presharedKey: String?      // optional wireguard PSK
+    var localAddresses: [String]?  // interface addresses, e.g. ["10.0.0.2/32"]
+    var mtu: Int?
+    var reserved: [Int]?           // wireguard reserved bytes (3 ints)
+
+    /// The core engine that handles this protocol.
+    var engine: CoreEngine {
+        switch proto {
+        case .vless, .vmess, .trojan, .shadowsocks:        return .xray
+        case .hysteria2, .tuic, .wireguard, .anytls:       return .singbox
+        }
+    }
 
     init(
         name: String,

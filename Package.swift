@@ -12,6 +12,7 @@ let package = Package(
             path: "Sources/XrayClient",
             resources: [
                 .copy("Resources/xray"),
+                .copy("Resources/sing-box"),
                 .copy("Resources/tun2socks"),
                 .copy("Resources/tun-up.sh"),
                 .copy("Resources/tun-down.sh"),

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Veil — Native macOS VPN client for Xray-core</title>
-<meta name="description" content="Veil is a native macOS VPN client for the Xray-core proxy engine. VLESS, VMess, Trojan, Shadowsocks, Reality. System Proxy & TUN modes, subscriptions, professional routing.">
+<meta name="description" content="Veil is a native macOS VPN client for the Xray-core and sing-box proxy engines. VLESS, VMess, Trojan, Shadowsocks, Hysteria2, TUIC, WireGuard, AnyTLS, Reality. System Proxy & TUN modes, subscriptions, QR import, professional routing.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%237c3aed'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='22' fill='url(%23g)'/%3E%3Cpath d='M50 82 L22 70 L22 40 Q22 24 50 18 Q78 24 78 40 L78 70 Z' fill='%23ffffff' opacity='.96'/%3E%3Cpath d='M36 32 L44 32 L50 58 L56 32 L64 32 L52 70 L48 70 Z' fill='%237c3aed'/%3E%3C/svg%3E">
 <style>
   :root{
@@ -153,8 +153,8 @@
     <svg class="logo-lg" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="url(#vg)"/><path d="M50 82 L22 70 L22 40 Q22 24 50 18 Q78 24 78 40 L78 70 Z" fill="#fff" opacity=".96"/><path d="M36 32 L44 32 L50 58 L56 32 L64 32 L52 70 L48 70 Z" fill="#7c3aed"/></svg>
     <h1 data-en>The native <span class="g">Xray</span> client for macOS</h1>
     <h1 data-ru>Нативный <span class="g">Xray</span>-клиент для macOS</h1>
-    <p class="sub" data-en>VLESS · VMess · Trojan · Shadowsocks · Reality. System-proxy and full-device TUN tunneling, subscription profiles, and professional domain/IP routing — in a clean menu-bar app.</p>
-    <p class="sub" data-ru>VLESS · VMess · Trojan · Shadowsocks · Reality. Системный прокси и полный TUN-туннель, профили подписок и профессиональная маршрутизация по доменам/IP — в аккуратном приложении в меню-баре.</p>
+    <p class="sub" data-en>VLESS · VMess · Trojan · Shadowsocks · Hysteria2 · TUIC · WireGuard · AnyTLS · Reality. System-proxy and full-device TUN tunneling, subscription profiles, and professional domain/IP routing — in a clean menu-bar app.</p>
+    <p class="sub" data-ru>VLESS · VMess · Trojan · Shadowsocks · Hysteria2 · TUIC · WireGuard · AnyTLS · Reality. Системный прокси и полный TUN-туннель, профили подписок и профессиональная маршрутизация по доменам/IP — в аккуратном приложении в меню-баре.</p>
     <div class="cta">
       <a class="btn btn-p" href="https://github.com/faustyu1/veil/releases/latest/download/Veil.app.zip" data-en>Download for macOS</a>
       <a class="btn btn-p" href="https://github.com/faustyu1/veil/releases/latest/download/Veil.app.zip" data-ru>Скачать для macOS</a>
@@ -174,8 +174,8 @@
     <div class="grid">
       <div class="card"><div class="ic">🔐</div>
         <h3 data-en>Modern protocols</h3><h3 data-ru>Современные протоколы</h3>
-        <p data-en>VLESS, VMess, Trojan, Shadowsocks with Reality & TLS over tcp/ws/grpc/http, including xtls-rprx-vision.</p>
-        <p data-ru>VLESS, VMess, Trojan, Shadowsocks с Reality и TLS поверх tcp/ws/grpc/http, включая xtls-rprx-vision.</p>
+        <p data-en>VLESS, VMess, Trojan, Shadowsocks with Reality & TLS over tcp/ws/grpc/http/xhttp (incl. xtls-rprx-vision & post-quantum), plus Hysteria2, TUIC, WireGuard & AnyTLS via a bundled sing-box core.</p>
+        <p data-ru>VLESS, VMess, Trojan, Shadowsocks с Reality и TLS поверх tcp/ws/grpc/http/xhttp (включая xtls-rprx-vision и постквантовое шифрование), а также Hysteria2, TUIC, WireGuard и AnyTLS через встроенное ядро sing-box.</p>
       </div>
       <div class="card"><div class="ic">🌐</div>
         <h3 data-en>Two tunnel modes</h3><h3 data-ru>Два режима туннеля</h3>
@@ -201,6 +201,11 @@
         <h3 data-en>Latency testing</h3><h3 data-ru>Тест задержки</h3>
         <p data-en>TCP-connect ping per server or group, with host-route bypass while TUN is active. Sort by ping, filter alive.</p>
         <p data-ru>TCP-пинг по серверу или группе, с обходом маршрута при активном TUN. Сортировка по пингу, фильтр живых.</p>
+      </div>
+      <div class="card"><div class="ic">📱</div>
+        <h3 data-en>QR import & export</h3><h3 data-ru>QR-импорт и экспорт</h3>
+        <p data-en>Show any server as a QR code, save it as PNG, or add servers by scanning a QR with the camera or an image file.</p>
+        <p data-ru>Покажите любой сервер как QR-код, сохраните в PNG или добавьте серверы, отсканировав QR камерой либо из изображения.</p>
       </div>
       <div class="card"><div class="ic">🛡️</div>
         <h3 data-en>Ad & tracker blocking</h3><h3 data-ru>Блокировка рекламы</h3>
@@ -290,8 +295,8 @@
     <div class="steps">
       <div class="step"><div class="n">01</div>
         <h3 data-en>Add servers</h3><h3 data-ru>Добавьте серверы</h3>
-        <p data-en>Import a subscription URL or paste vless:// / vmess:// / trojan:// / ss:// links.</p>
-        <p data-ru>Импортируйте подписку или вставьте ссылки vless:// / vmess:// / trojan:// / ss://.</p>
+        <p data-en>Import a subscription URL or paste vless:// / vmess:// / trojan:// / ss:// / hysteria2:// / tuic:// / wireguard:// links — or scan a QR code.</p>
+        <p data-ru>Импортируйте подписку или вставьте ссылки vless:// / vmess:// / trojan:// / ss:// / hysteria2:// / tuic:// / wireguard:// — или отсканируйте QR-код.</p>
       </div>
       <div class="step"><div class="n">02</div>
         <h3 data-en>Pick a mode</h3><h3 data-ru>Выберите режим</h3>
@@ -334,8 +339,8 @@
 <footer>
   <div class="wrap">
     <p>Veil · <a href="https://github.com/faustyu1/veil">GitHub</a> · <a href="https://github.com/faustyu1/veil/releases">Releases</a> · MIT License</p>
-    <p style="margin-top:8px" data-en>Powered by <a href="https://github.com/XTLS/Xray-core">Xray-core</a> and <a href="https://github.com/xjasonlyu/tun2socks">tun2socks</a>.</p>
-    <p style="margin-top:8px" data-ru>На базе <a href="https://github.com/XTLS/Xray-core">Xray-core</a> и <a href="https://github.com/xjasonlyu/tun2socks">tun2socks</a>.</p>
+    <p style="margin-top:8px" data-en>Powered by <a href="https://github.com/XTLS/Xray-core">Xray-core</a>, <a href="https://github.com/SagerNet/sing-box">sing-box</a> and <a href="https://github.com/xjasonlyu/tun2socks">tun2socks</a>.</p>
+    <p style="margin-top:8px" data-ru>На базе <a href="https://github.com/XTLS/Xray-core">Xray-core</a>, <a href="https://github.com/SagerNet/sing-box">sing-box</a> и <a href="https://github.com/xjasonlyu/tun2socks">tun2socks</a>.</p>
     <p class="disc" data-en>Veil is a client for proxy protocols intended for privacy, development and lawful circumvention of censorship. You are responsible for complying with the laws and terms of service that apply to you.</p>
     <p class="disc" data-ru>Veil — клиент для прокси-протоколов, предназначенный для приватности, разработки и законного обхода цензуры. Вы несёте ответственность за соблюдение применимых к вам законов и условий использования.</p>
   </div>

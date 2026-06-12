@@ -279,6 +279,9 @@ struct SubscriptionGroupView: View {
     var selectionMode: Bool = false
     var selectedForDeletion: Binding<Set<UUID>> = .constant([])
 
+    /// Server whose QR code is currently being shown (drives the QR sheet).
+    @State private var qrServer: ProxyConfig?
+
     /// Servers after applying search text, alive filter, and ping sort.
     private var visibleServers: [ProxyConfig] {
         var list = subscription.servers
@@ -347,6 +350,13 @@ struct SubscriptionGroupView: View {
                                 store.select(server.id); connection.connect(to: server)
                             }
                             Button(loc("Test ping")) { pinger.test([server], tunActive: connection.mode == .tun && connection.isConnected) }
+                            Divider()
+                            Button(loc("Copy link")) {
+                                let link = LinkBuilder.link(for: server)
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(link, forType: .string)
+                            }
+                            Button(loc("Show QR code")) { qrServer = server }
                             if subscription.isManual && !isLocked {
                                 Divider()
                                 Button(loc("Delete"), role: .destructive) {
@@ -358,6 +368,9 @@ struct SubscriptionGroupView: View {
                 }
             }
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+            .sheet(item: $qrServer) { server in
+                QRDisplaySheet(server: server)
+            }
         }
     }
 

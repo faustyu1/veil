@@ -53,6 +53,7 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
 ${ICON_LINE}
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSCameraUsageDescription</key><string>Veil uses the camera to scan server QR codes.</string>
   <key>LSUIElement</key><false/>
 </dict>
 </plist>

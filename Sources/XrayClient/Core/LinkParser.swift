@@ -29,11 +29,15 @@ enum LinkParser {
         let scheme = String(line[line.startIndex..<schemeEnd.lowerBound]).lowercased()
 
         switch scheme {
-        case "vless":   return try parseVLESS(line)
-        case "vmess":   return try parseVMess(line)
-        case "trojan":  return try parseTrojan(line)
-        case "ss":      return try parseShadowsocks(line)
-        default:        throw LinkParseError.unsupportedScheme(scheme)
+        case "vless":            return try parseVLESS(line)
+        case "vmess":            return try parseVMess(line)
+        case "trojan":           return try parseTrojan(line)
+        case "ss":               return try parseShadowsocks(line)
+        case "hysteria2", "hy2": return try parseHysteria2(line)
+        case "tuic":             return try parseTUIC(line)
+        case "anytls":           return try parseAnyTLS(line)
+        case "wireguard", "wg":  return try parseWireGuard(line)
+        default:                 throw LinkParseError.unsupportedScheme(scheme)
         }
     }
 
@@ -161,8 +165,182 @@ enum LinkParser {
         return cfg
     }
 
-    // MARK: - Shared helpers
+    // MARK: - Hysteria2 (sing-box core)
+    //
+    // hysteria2://password@host:port?sni=...&obfs=salamander&obfs-password=...
+    //   &insecure=1&alpn=h3#name   (hy2:// is an accepted alias)
 
+    private static func parseHysteria2(_ line: String) throws -> ProxyConfig {
+        guard let comps = URLComponents(string: line),
+              let host = comps.host,
+              let port = comps.port else {
+            throw LinkParseError.malformed(line)
+        }
+        var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
+                              proto: .hysteria2, address: host, port: port)
+        // The userinfo carries the auth password (may be percent-encoded).
+        if let user = comps.user {
+            cfg.password = user.removingPercentEncoding ?? user
+        }
+        let q = queryDict(comps)
+        cfg.security = .tls
+        cfg.sni = q["sni"] ?? q["peer"]
+        cfg.allowInsecure = (q["insecure"] == "1" || q["insecure"] == "true")
+        if let alpn = q["alpn"]?.removingPercentEncoding {
+            cfg.alpn = alpn.split(separator: ",").map(String.init)
+        }
+        cfg.obfs = q["obfs"]
+        cfg.obfsPassword = (q["obfs-password"] ?? q["obfs_password"])?.removingPercentEncoding
+        if let up = q["upmbps"] ?? q["up"] { cfg.upMbps = Int(up) }
+        if let down = q["downmbps"] ?? q["down"] { cfg.downMbps = Int(down) }
+        cfg.fingerprint = q["fp"]
+        return cfg
+    }
+
+    // MARK: - TUIC (sing-box core)
+    //
+    // tuic://uuid:password@host:port?sni=...&congestion_control=bbr
+    //   &udp_relay_mode=native&alpn=h3&allow_insecure=0#name
+
+    private static func parseTUIC(_ line: String) throws -> ProxyConfig {
+        guard let comps = URLComponents(string: line),
+              let host = comps.host,
+              let port = comps.port else {
+            throw LinkParseError.malformed(line)
+        }
+        var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
+                              proto: .tuic, address: host, port: port)
+        // userinfo = uuid:password
+        cfg.uuid = comps.user?.removingPercentEncoding ?? comps.user
+        if let pwd = comps.password {
+            cfg.password = pwd.removingPercentEncoding ?? pwd
+        }
+        let q = queryDict(comps)
+        cfg.security = .tls
+        cfg.sni = q["sni"] ?? q["peer"]
+        cfg.allowInsecure = (q["allow_insecure"] == "1" || q["allow_insecure"] == "true"
+                             || q["insecure"] == "1" || q["insecure"] == "true")
+        if let alpn = q["alpn"]?.removingPercentEncoding {
+            cfg.alpn = alpn.split(separator: ",").map(String.init)
+        }
+        cfg.congestionControl = q["congestion_control"] ?? q["congestion"]
+        cfg.udpRelayMode = q["udp_relay_mode"]
+        cfg.fingerprint = q["fp"]
+        return cfg
+    }
+
+    // MARK: - AnyTLS (sing-box core)
+    //
+    // anytls://password@host:port?sni=...&insecure=0&alpn=h2,http/1.1#name
+
+    private static func parseAnyTLS(_ line: String) throws -> ProxyConfig {
+        guard let comps = URLComponents(string: line),
+              let host = comps.host,
+              let port = comps.port else {
+            throw LinkParseError.malformed(line)
+        }
+        var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
+                              proto: .anytls, address: host, port: port)
+        if let user = comps.user {
+            cfg.password = user.removingPercentEncoding ?? user
+        }
+        // Some share formats put the password in the password slot instead.
+        if cfg.password == nil, let pwd = comps.password {
+            cfg.password = pwd.removingPercentEncoding ?? pwd
+        }
+        let q = queryDict(comps)
+        cfg.security = .tls
+        cfg.sni = q["sni"] ?? q["peer"] ?? q["host"]
+        cfg.allowInsecure = (q["insecure"] == "1" || q["insecure"] == "true"
+                             || q["allowInsecure"] == "1" || q["allowInsecure"] == "true")
+        if let alpn = q["alpn"]?.removingPercentEncoding {
+            cfg.alpn = alpn.split(separator: ",").map(String.init)
+        }
+        cfg.fingerprint = q["fp"]
+        return cfg
+    }
+
+    // MARK: - WireGuard (sing-box endpoint)
+    //
+    // Two accepted forms:
+    //  1. URI: wireguard://<privkey>@host:port?publickey=...&address=10.0.0.2/32
+    //          &reserved=0,0,0&mtu=1408&presharedkey=...#name
+    //  2. A standard wg-quick .conf paste with [Interface]/[Peer] sections.
+
+    private static func parseWireGuard(_ line: String) throws -> ProxyConfig {
+        guard let comps = URLComponents(string: line),
+              let host = comps.host,
+              let port = comps.port else {
+            throw LinkParseError.malformed(line)
+        }
+        var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
+                              proto: .wireguard, address: host, port: port)
+        // userinfo carries the local private key.
+        if let user = comps.user {
+            cfg.privateKey = (user.removingPercentEncoding ?? user)
+        }
+        let q = queryDict(comps)
+        cfg.privateKey = cfg.privateKey ?? (q["privatekey"] ?? q["secretkey"])?.removingPercentEncoding
+        cfg.peerPublicKey = (q["publickey"] ?? q["public_key"] ?? q["peer_public_key"])?.removingPercentEncoding
+        cfg.presharedKey = (q["presharedkey"] ?? q["pre_shared_key"])?.removingPercentEncoding
+        if let addr = (q["address"] ?? q["ip"])?.removingPercentEncoding {
+            cfg.localAddresses = addr.split(separator: ",").map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+        }
+        if let mtu = q["mtu"] { cfg.mtu = Int(mtu) }
+        if let reserved = q["reserved"]?.removingPercentEncoding {
+            let parts = reserved.split(separator: ",").compactMap {
+                Int($0.trimmingCharacters(in: .whitespaces))
+            }
+            if parts.count == 3 { cfg.reserved = parts }
+        }
+        return cfg
+    }
+
+    /// Parses a wg-quick `.conf` text into a `ProxyConfig`. Public so the add
+    /// sheet can detect and feed raw config pastes that aren't URI links.
+    static func parseWireGuardConf(_ text: String, name: String? = nil) -> ProxyConfig? {
+        var privateKey: String?
+        var addresses: [String] = []
+        var mtu: Int?
+        var peerPublicKey: String?
+        var presharedKey: String?
+        var endpointHost: String?
+        var endpointPort: Int?
+
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let l = rawLine.trimmingCharacters(in: .whitespaces)
+            guard let eq = l.firstIndex(of: "="), !l.hasPrefix("#"), !l.hasPrefix("[") else { continue }
+            let key = l[l.startIndex..<eq].trimmingCharacters(in: .whitespaces).lowercased()
+            let value = l[l.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+            switch key {
+            case "privatekey":   privateKey = value
+            case "address":      addresses = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            case "mtu":          mtu = Int(value)
+            case "publickey":    peerPublicKey = value
+            case "presharedkey": presharedKey = value
+            case "endpoint":
+                let (h, p) = splitHostPort(value)
+                endpointHost = h; endpointPort = p
+            default: break
+            }
+        }
+
+        guard let host = endpointHost, let port = endpointPort,
+              privateKey != nil, peerPublicKey != nil else {
+            return nil
+        }
+        var cfg = ProxyConfig(name: name ?? host, proto: .wireguard, address: host, port: port)
+        cfg.privateKey = privateKey
+        cfg.peerPublicKey = peerPublicKey
+        cfg.presharedKey = presharedKey
+        cfg.localAddresses = addresses.isEmpty ? nil : addresses
+        cfg.mtu = mtu
+        return cfg
+    }
+
+    // MARK: - Shared helpers
     private static func applyTransport(_ cfg: inout ProxyConfig, query q: [String: String]) {
         if let net = q["type"] ?? q["net"] {
             cfg.network = TransportNetwork(rawValue: net) ?? .tcp
@@ -170,6 +348,18 @@ enum LinkParser {
         cfg.path = q["path"]?.removingPercentEncoding ?? q["path"]
         cfg.host = q["host"]?.removingPercentEncoding ?? q["host"]
         cfg.serviceName = q["serviceName"]?.removingPercentEncoding ?? q["serviceName"]
+        // XHTTP transport (a.k.a. SplitHTTP). `mode` selects the upload strategy.
+        cfg.xhttpMode = q["mode"]
+        // Padding can arrive either as a flat `x_padding_bytes` param or nested
+        // inside the `extra` JSON object (xPaddingBytes). Prefer the explicit one.
+        if let pad = q["x_padding_bytes"] ?? q["xPaddingBytes"] {
+            cfg.xPaddingBytes = pad.removingPercentEncoding ?? pad
+        } else if let extraRaw = q["extra"]?.removingPercentEncoding,
+                  let data = extraRaw.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let pad = json["xPaddingBytes"] as? String {
+            cfg.xPaddingBytes = pad
+        }
     }
 
     private static func applySecurity(_ cfg: inout ProxyConfig, query q: [String: String]) {
