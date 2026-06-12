@@ -11,9 +11,20 @@ permissions:
 jobs:
   release:
     name: Build & Publish Veil.app
-    runs-on: macos-15
+    # macos-26 (Tahoe) ships the macOS 26 SDK. Linking against it is what
+    # enables the modern Liquid Glass / Tahoe look — an app built against the
+    # macOS 15 SDK renders in legacy style even when run on macOS 26+.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select latest Xcode (macOS 26 SDK)
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcrun --show-sdk-version
 
       - name: Derive version from tag
         id: version

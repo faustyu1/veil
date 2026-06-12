@@ -9,9 +9,12 @@ on:
 jobs:
   build-test:
     name: Build & Test
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select latest Xcode (macOS 26 SDK)
+        run: sudo xcode-select -s /Applications/Xcode.app
 
       - name: Show Swift version
         run: swift --version
