@@ -48,11 +48,12 @@ struct CameraScannerView: NSViewRepresentable {
 }
 
 /// Hosts the AVCaptureVideoPreviewLayer and owns the capture session.
+/// Everything runs on the main actor (NSView is @MainActor): configuration for
+/// a QR sheet is cheap, which keeps this clean under strict concurrency.
 final class ScannerNSView: NSView {
     weak var coordinator: CameraScannerView.Coordinator?
     private let session = AVCaptureSession()
     private var preview: AVCaptureVideoPreviewLayer?
-    private let sessionQueue = DispatchQueue(label: "veil.camera.session")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -63,10 +64,11 @@ final class ScannerNSView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) not supported") }
 
     func start() {
-        // Ask for camera permission, then configure on a background queue.
-        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-            guard granted, let self else { return }
-            self.sessionQueue.async { self.configure() }
+        // Ask for camera permission (callback is on an arbitrary queue), then
+        // hop back to the main actor to configure the session.
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+            guard granted else { return }
+            Task { @MainActor [weak self] in self?.configure() }
         }
     }
 
@@ -90,21 +92,17 @@ final class ScannerNSView: NSView {
         }
         session.commitConfiguration()
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let preview = AVCaptureVideoPreviewLayer(session: self.session)
-            preview.videoGravity = .resizeAspectFill
-            preview.frame = self.bounds
-            self.layer?.addSublayer(preview)
-            self.preview = preview
-        }
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        preview.frame = bounds
+        layer?.addSublayer(preview)
+        self.preview = preview
+
         session.startRunning()
     }
 
     func stop() {
-        sessionQueue.async { [weak self] in
-            self?.session.stopRunning()
-        }
+        session.stopRunning()
     }
 
     override func layout() {
