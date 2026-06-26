@@ -104,6 +104,26 @@ struct ProxyConfig: Codable, Identifiable, Equatable {
         }
     }
 
+    /// How the ping tester should probe this server for reachability + RTT.
+    enum PingStrategy: Sendable, Equatable {
+        case tcp   // standard TCP connect (has a TCP listener)
+        case quic  // real QUIC + TLS handshake (Hysteria2 / TUIC)
+        case icmp  // ICMP echo (WireGuard — no TCP listener, not QUIC either)
+    }
+
+    /// Picks the probe transport. Hysteria2/TUIC speak QUIC, so we run a genuine
+    /// QUIC+TLS handshake and time it — a TCP connect would always "time out"
+    /// since they expose no TCP port. WireGuard is a UDP/Noise protocol with no
+    /// TCP port and no QUIC, so it falls back to ICMP echo. AnyTLS, despite
+    /// running on the sing-box core, speaks ordinary TLS over TCP.
+    var pingStrategy: PingStrategy {
+        switch proto {
+        case .hysteria2, .tuic:                              return .quic
+        case .wireguard:                                     return .icmp
+        case .vless, .vmess, .trojan, .shadowsocks, .anytls: return .tcp
+        }
+    }
+
     init(
         name: String,
         proto: ProxyProtocol,

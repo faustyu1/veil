@@ -23,6 +23,71 @@ struct ContentView: View {
         connection.mode == .tun && connection.isConnected
     }
 
+    /// Drives keyboard focus so arrow keys / Enter target the server list.
+    @FocusState private var listFocused: Bool
+
+    /// Servers in on-screen order across all groups, honouring collapse state,
+    /// search text, the alive filter, and ping sort. This is the order the
+    /// up/down arrow keys walk through.
+    private var navigableServers: [ProxyConfig] {
+        store.subscriptions.flatMap { sub -> [ProxyConfig] in
+            sub.isCollapsed ? [] : Self.filterServers(
+                sub.servers, search: searchText, aliveOnly: aliveOnly,
+                sortByPing: sortByPing, pinger: pinger)
+        }
+    }
+
+    /// Shared filter/sort used by both the keyboard navigation order and the
+    /// per-group views, so the two never drift apart.
+    static func filterServers(_ servers: [ProxyConfig], search: String,
+                              aliveOnly: Bool, sortByPing: Bool,
+                              pinger: PingTester) -> [ProxyConfig] {
+        var list = servers
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            list = list.filter { $0.name.lowercased().contains(q)
+                || $0.address.lowercased().contains(q) }
+        }
+        if aliveOnly {
+            list = list.filter {
+                if let outer = pinger.latency(for: $0.id), outer != nil { return true }
+                return false
+            }
+        }
+        if sortByPing {
+            list.sort { a, b in
+                let la = (pinger.latency(for: a.id) ?? nil) ?? Int.max
+                let lb = (pinger.latency(for: b.id) ?? nil) ?? Int.max
+                return la < lb
+            }
+        }
+        return list
+    }
+
+    /// Moves the selection up or down the visible list. Selecting a server while
+    /// connected switches to it immediately (matching tap behaviour); while
+    /// disconnected it just highlights, and Enter connects.
+    private func moveSelection(by delta: Int) {
+        let list = navigableServers
+        guard !list.isEmpty else { return }
+        let currentIdx = list.firstIndex { $0.id == store.selectedServerID }
+        let nextIdx: Int
+        if let currentIdx {
+            nextIdx = min(max(currentIdx + delta, 0), list.count - 1)
+        } else {
+            // No selection yet: down picks the first, up picks the last.
+            nextIdx = delta > 0 ? 0 : list.count - 1
+        }
+        store.select(list[nextIdx].id)
+    }
+
+    /// Connects to the currently-selected server (Enter / Return).
+    private func connectSelected() {
+        if let s = store.server(withID: store.selectedServerID) {
+            connection.connect(to: s)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -119,14 +184,14 @@ struct ContentView: View {
             Button(role: .destructive) { connection.disconnect() } label: {
                 Label("Disconnect", systemImage: "stop.fill").frame(minWidth: 96)
             }
-            .controlSize(.large).buttonStyle(.borderedProminent).tint(.red)
+            .controlSize(.large).glassProminentButton().tint(.red)
         } else {
             Button {
                 if let s = selected { connection.connect(to: s) }
             } label: {
                 Label("Connect", systemImage: "bolt.fill").frame(minWidth: 96)
             }
-            .controlSize(.large).buttonStyle(.borderedProminent)
+            .controlSize(.large).glassProminentButton()
             .disabled(selected == nil)
         }
     }
@@ -134,25 +199,42 @@ struct ContentView: View {
     // MARK: - Server list (collapsible groups)
 
     private var serverList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                if store.subscriptions.isEmpty {
-                    emptyState
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if store.subscriptions.isEmpty {
+                        emptyState
+                    }
+                    ForEach(store.subscriptions) { sub in
+                        SubscriptionGroupView(
+                            subscription: sub,
+                            searchText: searchText,
+                            aliveOnly: aliveOnly,
+                            sortByPing: sortByPing,
+                            selectionMode: selectionMode && sub.isManual,
+                            selectedForDeletion: $selectedForDeletion
+                        )
+                    }
                 }
-                ForEach(store.subscriptions) { sub in
-                    SubscriptionGroupView(
-                        subscription: sub,
-                        searchText: searchText,
-                        aliveOnly: aliveOnly,
-                        sortByPing: sortByPing,
-                        selectionMode: selectionMode && sub.isManual,
-                        selectedForDeletion: $selectedForDeletion
-                    )
+                .padding(12)
+            }
+            .frame(minHeight: 240)
+            // Keep the keyboard-selected row visible as it moves.
+            .onChange(of: store.selectedServerID) { _, id in
+                guard let id else { return }
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo(id, anchor: .center)
                 }
             }
-            .padding(12)
         }
-        .frame(minHeight: 240)
+        // Make the list the keyboard focus target and wire arrow keys + Enter.
+        .focusable()
+        .focusEffectDisabled()
+        .focused($listFocused)
+        .onKeyPress(.upArrow) { moveSelection(by: -1); return .handled }
+        .onKeyPress(.downArrow) { moveSelection(by: 1); return .handled }
+        .onKeyPress(.return) { connectSelected(); return .handled }
+        .onAppear { listFocused = true }
     }
 
     private var emptyState: some View {
@@ -182,15 +264,18 @@ struct ContentView: View {
                 Button { showSubSheet = true } label: {
                     Label(loc("Subscription"), systemImage: "arrow.down.circle")
                 }
+                .glassButton()
                 Button { showAddSheet = true } label: {
                     Label(loc("Add Link"), systemImage: "plus")
                 }
+                .glassButton()
                 Button {
                     Task { isRefreshing = true; await SubscriptionService.refreshAll(store); isRefreshing = false }
                 } label: {
                     if isRefreshing { ProgressView().controlSize(.small) }
                     else { Label(loc("Refresh"), systemImage: "arrow.clockwise") }
                 }
+                .glassButton()
                 .disabled(isRefreshing)
 
                 Button {
@@ -198,6 +283,7 @@ struct ContentView: View {
                 } label: {
                     Label(loc("Test Ping"), systemImage: "speedometer")
                 }
+                .glassButton()
                 .disabled(store.allServers.isEmpty)
 
                 if hasManualServers {
@@ -207,6 +293,7 @@ struct ContentView: View {
                     } label: {
                         Label(loc("Select"), systemImage: selectionMode ? "checkmark.circle.fill" : "checkmark.circle")
                     }
+                    .glassButton()
                 }
 
                 Spacer()
@@ -216,6 +303,7 @@ struct ContentView: View {
                 Button { showSettings = true } label: {
                     Label(loc("Settings"), systemImage: "gearshape")
                 }
+                .glassButton()
             }
             .labelStyle(.titleAndIcon)
             .padding(.horizontal, 12).padding(.vertical, 8)
@@ -284,26 +372,9 @@ struct SubscriptionGroupView: View {
 
     /// Servers after applying search text, alive filter, and ping sort.
     private var visibleServers: [ProxyConfig] {
-        var list = subscription.servers
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        if !q.isEmpty {
-            list = list.filter { $0.name.lowercased().contains(q)
-                || $0.address.lowercased().contains(q) }
-        }
-        if aliveOnly {
-            list = list.filter {
-                if let outer = pinger.latency(for: $0.id), outer != nil { return true }
-                return false
-            }
-        }
-        if sortByPing {
-            list.sort { a, b in
-                let la = (pinger.latency(for: a.id) ?? nil) ?? Int.max
-                let lb = (pinger.latency(for: b.id) ?? nil) ?? Int.max
-                return la < lb
-            }
-        }
-        return list
+        ContentView.filterServers(subscription.servers, search: searchText,
+                                  aliveOnly: aliveOnly, sortByPing: sortByPing,
+                                  pinger: pinger)
     }
 
     /// Hide groups entirely filtered out by an active search/alive filter.
@@ -340,6 +411,7 @@ struct SubscriptionGroupView: View {
                             )
                         }
                         .contentShape(Rectangle())
+                        .id(server.id)
                         .onTapGesture {
                             if selectionMode {
                                 if !isLocked { toggleSelection(server.id) }
@@ -549,5 +621,31 @@ struct LogPane: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+// MARK: - Liquid Glass styling (macOS 26+) with graceful fallback
+
+extension View {
+    /// Applies the Liquid Glass button style on macOS 26+, falling back to the
+    /// bordered style on earlier releases so the app still builds and runs on
+    /// the .macOS(.v14) deployment target.
+    @ViewBuilder
+    func glassButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glass)
+        } else {
+            self.buttonStyle(.bordered)
+        }
+    }
+
+    /// Prominent Liquid Glass variant for primary actions (e.g. Connect).
+    @ViewBuilder
+    func glassProminentButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glassProminent)
+        } else {
+            self.buttonStyle(.borderedProminent)
+        }
     }
 }

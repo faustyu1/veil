@@ -396,4 +396,24 @@ final class LinkBuilderTests: XCTestCase {
         XCTAssertEqual(cfg.peerPublicKey, "cHVi")
         XCTAssertEqual(cfg.mtu, 1408)
     }
+
+    // MARK: - Ping transport classification
+    //
+    // QUIC protocols (Hysteria2/TUIC) get a real QUIC handshake probe; WireGuard
+    // has no TCP/QUIC listener so it falls back to ICMP; everything else (incl.
+    // AnyTLS, which is TLS-over-TCP) uses a plain TCP connect.
+
+    func testPingStrategyClassification() {
+        func cfg(_ proto: ProxyProtocol) -> ProxyConfig {
+            ProxyConfig(name: "x", proto: proto, address: "h", port: 443)
+        }
+        XCTAssertEqual(cfg(.hysteria2).pingStrategy, .quic)
+        XCTAssertEqual(cfg(.tuic).pingStrategy, .quic)
+        XCTAssertEqual(cfg(.wireguard).pingStrategy, .icmp)
+        XCTAssertEqual(cfg(.vless).pingStrategy, .tcp)
+        XCTAssertEqual(cfg(.vmess).pingStrategy, .tcp)
+        XCTAssertEqual(cfg(.trojan).pingStrategy, .tcp)
+        XCTAssertEqual(cfg(.shadowsocks).pingStrategy, .tcp)
+        XCTAssertEqual(cfg(.anytls).pingStrategy, .tcp)
+    }
 }
