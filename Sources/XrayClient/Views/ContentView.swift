@@ -95,9 +95,8 @@ struct ContentView: View {
             searchBar
             serverList
             if showLog {
-                Divider()
-                LogPane(text: connection.logs)
-                    .frame(height: 140)
+                LogPane(text: connection.logs, onClear: { connection.clearLogs() })
+                    .frame(height: 168)
             }
             Divider()
             footer
@@ -606,21 +605,96 @@ struct ServerRow: View {
 
 struct LogPane: View {
     let text: String
+    var onClear: (() -> Void)? = nil
+
+    private var lineCount: Int {
+        text.isEmpty ? 0 : text.split(separator: "\n", omittingEmptySubsequences: false).count
+    }
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                Text(text.isEmpty ? "No logs yet." : text)
-                    .font(.system(.caption2, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .id("bottom")
+        VStack(spacing: 0) {
+            // Header toolbar.
+            HStack(spacing: 8) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("Logs")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("\(lineCount)")
+                    .font(.system(size: 10, weight: .medium)).monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc").font(.system(size: 11))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Copy all logs")
+                .disabled(text.isEmpty)
+                Button {
+                    onClear?()
+                } label: {
+                    Image(systemName: "trash").font(.system(size: 11))
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+                .help("Clear logs")
+                .disabled(text.isEmpty)
             }
-            .onChange(of: text) { _, _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .logHeaderBackground()
+
+            Divider().opacity(0.5)
+
+            // Scrollable monospaced body.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(text.isEmpty ? "No logs yet." : text)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(text.isEmpty ? Color.secondary : .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .id("bottom")
+                }
+                .onChange(of: text) { _, _ in
+                    withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
             }
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .logPaneBackground()
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+}
+
+extension View {
+    /// Glass material behind the log panel on macOS 26+, with a solid
+    /// text-background fallback on earlier systems.
+    @ViewBuilder
+    func logPaneBackground() -> some View {
+        if #available(macOS 26.0, *) {
+            self.background(.regularMaterial)
+        } else {
+            self.background(Color(nsColor: .textBackgroundColor))
+        }
+    }
+
+    /// Slightly tinted header strip so the toolbar reads above the body.
+    @ViewBuilder
+    func logHeaderBackground() -> some View {
+        if #available(macOS 26.0, *) {
+            self.background(.thinMaterial)
+        } else {
+            self.background(Color.primary.opacity(0.05))
+        }
     }
 }
 

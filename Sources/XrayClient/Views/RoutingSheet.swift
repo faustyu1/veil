@@ -19,6 +19,7 @@ struct RoutingSheet: View {
                 Spacer()
                 Button(loc("Done")) { applyAndDismiss() }
                     .keyboardShortcut(.defaultAction)
+                    .glassProminentButton()
             }
             .padding()
             Divider()
@@ -94,6 +95,7 @@ struct RoutingSheet: View {
                 Button(geo.hasAssets ? loc("Update") : loc("Download")) {
                     Task { await downloadGeo() }
                 }
+                .glassButton()
                 .disabled(geo.isDownloading)
             }
             if let err = geo.lastError {

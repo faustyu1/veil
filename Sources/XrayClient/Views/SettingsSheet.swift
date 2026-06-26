@@ -16,7 +16,9 @@ struct SettingsSheet: View {
             HStack {
                 Text(loc("Settings")).font(.title2).bold()
                 Spacer()
-                Button(loc("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
+                Button(loc("Done")) { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .glassProminentButton()
             }
             .padding()
             Divider()
@@ -61,6 +63,7 @@ struct SettingsSheet: View {
                         }
                         Spacer()
                         Button(loc("Configure…")) { showRouting = true }
+                            .glassButton()
                     }
                 }
 
@@ -97,11 +100,13 @@ struct SettingsSheet: View {
                                 TunManager.uninstallHelper()
                                 helperInstalled = TunManager.isHelperInstalled
                             }
+                            .glassButton().tint(.red)
                         } else {
                             Button(loc("Install")) {
                                 try? TunManager.installHelper()
                                 helperInstalled = TunManager.isHelperInstalled
                             }
+                            .glassProminentButton()
                         }
                     }
                 } header: {

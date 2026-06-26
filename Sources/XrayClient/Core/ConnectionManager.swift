@@ -341,6 +341,9 @@ final class ConnectionManager {
 
     // MARK: - Logs
 
+    /// Clears the in-memory log buffer (does not affect the running core).
+    func clearLogs() { logs = "" }
+
     private func appendLog(_ text: String) {
         logs += text
         if logs.count > 20_000 {
