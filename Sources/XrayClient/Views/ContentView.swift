@@ -121,10 +121,10 @@ struct ContentView: View {
             }
             Divider().frame(height: 16)
             Toggle("Alive", isOn: $aliveOnly)
-                .toggleStyle(.button).controlSize(.small)
+                .glassToggle().controlSize(.small)
                 .help("Show only servers that responded to the last ping test")
             Toggle("By ping", isOn: $sortByPing)
-                .toggleStyle(.button).controlSize(.small)
+                .glassToggle().controlSize(.small)
                 .help("Sort servers by latency within each group")
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
@@ -163,18 +163,13 @@ struct ContentView: View {
 
     private var modePicker: some View {
         @Bindable var conn = connection
-        return Picker("", selection: $conn.mode) {
-            ForEach(TunnelMode.allCases) { m in
-                Text(m == .systemProxy ? "Proxy" : "TUN").tag(m)
-            }
-        }
-        .pickerStyle(.segmented)
-        .fixedSize()
-        .onChange(of: connection.mode) { _, newMode in
+        return ModeGlassSwitch(
+            mode: $conn.mode,
+            isDisabled: connection.isConnected
+        ) { newMode in
             store.settings.mode = newMode
             store.save()
         }
-        .disabled(connection.isConnected)
         .help(connection.mode.subtitle)
     }
 
@@ -245,7 +240,9 @@ struct ContentView: View {
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button(loc("Add Subscription")) { showSubSheet = true }
+                    .glassButton()
                 Button(loc("Paste Link")) { showAddSheet = true }
+                    .glassProminentButton()
             }.padding(.top, 4)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
@@ -299,7 +296,7 @@ struct ContentView: View {
                 Spacer()
 
                 Toggle(isOn: $showLog) { Label(loc("Log"), systemImage: "text.alignleft") }
-                    .toggleStyle(.button)
+                    .glassToggle()
                 Button { showSettings = true } label: {
                     Label(loc("Settings"), systemImage: "gearshape")
                 }
@@ -322,6 +319,7 @@ struct ContentView: View {
             Button(allSelected ? loc("Deselect All") : loc("Select All")) {
                 selectedForDeletion = allSelected ? [] : manualIDs
             }
+            .glassButton()
             Text("\(selectedForDeletion.count)")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
@@ -333,11 +331,13 @@ struct ContentView: View {
             } label: {
                 Label(loc("Delete Selected"), systemImage: "trash")
             }
+            .glassProminentButton().tint(.red)
             .disabled(selectedForDeletion.isEmpty)
             Button(loc("Cancel")) {
                 selectionMode = false
                 selectedForDeletion.removeAll()
             }
+            .glassButton()
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
         .background(Color.primary.opacity(0.04))
@@ -647,5 +647,108 @@ extension View {
         } else {
             self.buttonStyle(.borderedProminent)
         }
+    }
+
+    /// Liquid Glass toggle (a button-style toggle that picks up the glass
+    /// material when selected on macOS 26+), with a bordered-button fallback.
+    @ViewBuilder
+    func glassToggle() -> some View {
+        if #available(macOS 26.0, *) {
+            self.toggleStyle(.button).buttonStyle(.glass)
+        } else {
+            self.toggleStyle(.button)
+        }
+    }
+}
+
+// MARK: - Draggable Liquid Glass mode switch (Proxy / TUN)
+
+/// A two-position switch styled with Liquid Glass. The glass thumb can be
+/// tapped on either side or grabbed and dragged across to flip between System
+/// Proxy and TUN. Falls back to a plain segmented look on pre-macOS 26.
+private struct ModeGlassSwitch: View {
+    @Binding var mode: TunnelMode
+    var isDisabled: Bool
+    var onChange: (TunnelMode) -> Void
+
+    /// Live horizontal offset of the thumb while dragging (nil = snapped).
+    @State private var dragX: CGFloat? = nil
+
+    private let labels: [(TunnelMode, String)] = [
+        (.systemProxy, "Proxy"), (.tun, "TUN"),
+    ]
+    private let height: CGFloat = 28
+    private let segWidth: CGFloat = 66
+
+    private var trackWidth: CGFloat { segWidth * 2 }
+    private var selectedIndex: Int { mode == .systemProxy ? 0 : 1 }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            // Track.
+            Capsule(style: .continuous)
+                .fill(Color.primary.opacity(0.08))
+
+            // Sliding glass thumb.
+            thumb
+                .frame(width: segWidth, height: height - 4)
+                .offset(x: thumbOffset + 2)
+                .animation(dragX == nil ? .spring(response: 0.28, dampingFraction: 0.8) : nil,
+                           value: selectedIndex)
+
+            // Labels on top.
+            HStack(spacing: 0) {
+                ForEach(Array(labels.enumerated()), id: \.offset) { idx, item in
+                    Text(item.1)
+                        .font(.system(size: 12, weight: idx == selectedIndex ? .semibold : .regular))
+                        .foregroundStyle(idx == selectedIndex ? Color.primary : .secondary)
+                        .frame(width: segWidth, height: height)
+                        .contentShape(Rectangle())
+                        .onTapGesture { select(labels[idx].0) }
+                }
+            }
+        }
+        .frame(width: trackWidth, height: height)
+        .clipShape(Capsule(style: .continuous))
+        .opacity(isDisabled ? 0.5 : 1)
+        .allowsHitTesting(!isDisabled)
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { v in
+                    // Centre the thumb under the finger, clamped to the track.
+                    let half = segWidth / 2
+                    dragX = min(max(v.location.x - half, 0), trackWidth - segWidth)
+                }
+                .onEnded { v in
+                    let target: TunnelMode = v.location.x > trackWidth / 2 ? .tun : .systemProxy
+                    dragX = nil
+                    select(target)
+                }
+        )
+    }
+
+    /// Where the thumb sits: follows the finger mid-drag, else snaps to segment.
+    private var thumbOffset: CGFloat {
+        if let dragX { return dragX }
+        return CGFloat(selectedIndex) * segWidth
+    }
+
+    @ViewBuilder
+    private var thumb: some View {
+        if #available(macOS 26.0, *) {
+            Capsule(style: .continuous)
+                .fill(.clear)
+                .glassEffect(.regular.interactive(), in: Capsule(style: .continuous))
+        } else {
+            Capsule(style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+        }
+    }
+
+    private func select(_ newMode: TunnelMode) {
+        guard newMode != mode else { return }
+        mode = newMode
+        onChange(newMode)
     }
 }
