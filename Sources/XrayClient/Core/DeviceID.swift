@@ -20,11 +20,15 @@ enum DeviceID {
             process.waitUntilExit()
             let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
                                 encoding: .utf8) ?? ""
+            // ioreg prints: "IOPlatformUUID" = "XXXX-XXXX-XXXX"
+            // Find the UUID value after the `= "` separator.
             if let range = output.range(of: "IOPlatformUUID") {
                 let rest = output[range.upperBound...]
-                if let openQ = rest.firstIndex(of: "\""),
-                   let closeQ = rest[rest.index(after: openQ)...].firstIndex(of: "\"") {
-                    return String(rest[rest.index(after: openQ)..<closeQ])
+                if let eqRange = rest.range(of: "= \"") {
+                    let afterEq = rest[eqRange.upperBound...]
+                    if let closeQ = afterEq.firstIndex(of: "\"") {
+                        return String(afterEq[..<closeQ])
+                    }
                 }
             }
         } catch {}
