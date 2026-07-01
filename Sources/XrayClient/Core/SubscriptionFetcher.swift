@@ -1,7 +1,10 @@
 import Foundation
+import os
 
 /// Fetches a subscription URL and decodes it into servers + optional metadata.
 enum SubscriptionFetcher {
+
+    private static let log = Logger(subsystem: "com.veil.client", category: "sub-fetch")
 
     struct Result {
         var servers: [ProxyConfig]
@@ -18,14 +21,23 @@ enum SubscriptionFetcher {
             var items = components.queryItems ?? []
             items.removeAll { $0.name == "hwid" }
             items.append(URLQueryItem(name: "hwid", value: hwid))
+            items.removeAll { $0.name == "device_id" }
+            items.append(URLQueryItem(name: "device_id", value: hwid))
             components.queryItems = items
         }
         guard let url = components.url else {
             throw LinkParseError.malformed(urlString)
         }
         var request = URLRequest(url: url)
-        request.setValue("Veil/1.0", forHTTPHeaderField: "User-Agent")
+        let ua = hwid.map { "Veil/1.0 (hwid: \($0))" } ?? "Veil/1.0"
+        request.setValue(ua, forHTTPHeaderField: "User-Agent")
+        if let hwid, !hwid.isEmpty {
+            request.setValue(hwid, forHTTPHeaderField: "X-HWID")
+            request.setValue(hwid, forHTTPHeaderField: "X-Device-ID")
+        }
         request.timeoutInterval = 20
+
+        log.info("Sub fetch URL=\(url.absoluteString, privacy: .public) hwid=\(hwid ?? "nil", privacy: .public)")
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let body = String(data: data, encoding: .utf8) else {
