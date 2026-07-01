@@ -76,6 +76,9 @@ struct AppSettings: Codable, Equatable {
     // Notifications
     var notifyOnConnect: Bool = false
 
+    // Subscription
+    var sendHwid: Bool = true
+
     init() {}
 
     /// Resilient decoding: any missing key falls back to its default so old
@@ -104,6 +107,7 @@ struct AppSettings: Codable, Equatable {
         autoConnectOnLaunch = get(.autoConnectOnLaunch, false)
         launchAtLogin = get(.launchAtLogin, false)
         notifyOnConnect = get(.notifyOnConnect, false)
+        sendHwid = get(.sendHwid, true)
     }
 
     /// The ordered routing rules to feed Xray, derived from the active preset

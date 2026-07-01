@@ -8,8 +8,9 @@ enum SubscriptionService {
     @discardableResult
     static func refresh(_ sub: Subscription, into store: ServerStore) async -> Bool {
         guard let url = sub.url else { return false }
+        let hwid = store.settings.sendHwid ? DeviceID.hwid : nil
         do {
-            let result = try await SubscriptionFetcher.fetch(url)
+            let result = try await SubscriptionFetcher.fetch(url, hwid: hwid)
             guard !result.servers.isEmpty else { return false }
             let name = result.profileTitle ?? sub.name
             store.addOrUpdateSubscription(name: name, url: url,

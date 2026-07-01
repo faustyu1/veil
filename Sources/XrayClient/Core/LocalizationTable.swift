@@ -224,6 +224,16 @@ extension Loc {
             "hi": "सदस्यताएं स्वतः अपडेट करें", "ar": "تحديث الاشتراكات تلقائيًا", "fr": "Mettre à jour les abonnements auto",
             "pt": "Atualizar assinaturas automaticamente", "de": "Abos automatisch aktualisieren",
             "ja": "サブスクを自動更新", "id": "Perbarui langganan otomatis", "tr": "Abonelikleri otomatik güncelle"],
+        "Send HWID with subscription requests": [
+            "ru": "Отправлять HWID с запросами подписки", "zh": "订阅请求附带 HWID", "es": "Enviar HWID con solicitudes de suscripción",
+            "hi": "सदस्यता अनुरोधों के साथ HWID भेजें", "ar": "إرسال HWID مع طلبات الاشتراك", "fr": "Envoyer le HWID avec les demandes d'abonnement",
+            "pt": "Enviar HWID com solicitações de assinatura", "de": "HWID mit Abo-Anfragen senden",
+            "ja": "サブスクリクエストにHWIDを送信", "id": "Kirim HWID dengan permintaan langganan", "tr": "Abonelik istekleriyle HWID gönder"],
+        "Identifies this device to providers that require it.": [
+            "ru": "Идентифицирует устройство для провайдеров, которым это требуется.", "zh": "为需要识别的提供商标识此设备。", "es": "Identifica este dispositivo para los proveedores que lo requieren.",
+            "hi": "इस डिवाइस को आवश्यक प्रदाताओं के लिए पहचानता है।", "ar": "يحدد هذا الجهاز للمزودين الذين يتطلبون ذلك.", "fr": "Identifie cet appareil auprès des fournisseurs qui l'exigent.",
+            "pt": "Identifica este dispositivo para provedores que exigem.", "de": "Identifiziert dieses Gerät bei Anbietern, die dies verlangen.",
+            "ja": "必要なプロバイダーにこのデバイスを識別させます。", "id": "Mengidentifikasi perangkat ini untuk penyedia yang memerlukannya.", "tr": "Bu cihazı gerektiren sağlayıcılar için tanımlar."],
         "Window": [
             "ru": "Окно", "zh": "窗口", "es": "Ventana", "hi": "विंडो",
             "ar": "النافذة", "fr": "Fenêtre", "pt": "Janela", "de": "Fenster",

@@ -30,7 +30,9 @@ final class PingTester {
                 for (_, host, _, _, _, _) in targets {
                     pinnedIPs.append(contentsOf: TunManager.resolveIPs(host: host))
                 }
-                await MainActor.run { TunManager.pingRouteAdd(pinnedIPs) }
+                // Route manipulation runs a blocking `sudo -n` Process — keep it
+                // off the main thread so the UI stays responsive.
+                TunManager.pingRouteAdd(pinnedIPs)
                 // Give the routing table a moment to settle.
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
@@ -61,18 +63,36 @@ final class PingTester {
                 }
 
                 for _ in 0..<maxConcurrent { addNext(&group) }
+
+                // Batch results to reduce @Observable churn and keep scrolling smooth.
+                var pending: [UUID: Int?] = [:]
+                var lastFlush = DispatchTime.now()
+                let flushIntervalNs: UInt64 = 150_000_000
+
                 while let (id, ms) = await group.next() {
-                    await MainActor.run {
-                        self.results[id] = .some(ms)
-                        self.testing.remove(id)
-                    }
+                    pending[id] = ms
                     addNext(&group)
+                    let now = DispatchTime.now()
+                    if now.uptimeNanoseconds - lastFlush.uptimeNanoseconds >= flushIntervalNs {
+                        let snapshot = pending
+                        pending.removeAll()
+                        lastFlush = now
+                        await self.applyResults(snapshot)
+                    }
                 }
+                if !pending.isEmpty { await self.applyResults(pending) }
             }
 
             if tunActive {
-                await MainActor.run { TunManager.pingRouteDel() }
+                TunManager.pingRouteDel()
             }
+        }
+    }
+
+    private func applyResults(_ batch: [UUID: Int?]) {
+        for (id, ms) in batch {
+            results[id] = .some(ms)
+            testing.remove(id)
         }
     }
 

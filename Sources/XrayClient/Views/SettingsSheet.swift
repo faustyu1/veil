@@ -120,6 +120,10 @@ struct SettingsSheet: View {
                         Text("Every \(store.settings.autoUpdateIntervalHours) h")
                     }
                     .onChange(of: store.settings.autoUpdateIntervalHours) { _, _ in store.save() }
+                    Toggle(loc("Send HWID with subscription requests"), isOn: $store.settings.sendHwid)
+                        .onChange(of: store.settings.sendHwid) { _, _ in store.save() }
+                    Text(loc("Identifies this device to providers that require it."))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section(loc("Window")) {

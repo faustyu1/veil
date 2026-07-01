@@ -96,7 +96,7 @@ struct ContentView: View {
             serverList
             if showLog {
                 LogPane(text: connection.logs, onClear: { connection.clearLogs() })
-                    .frame(height: 168)
+                    .frame(minHeight: 80, maxHeight: 168)
             }
             Divider()
             footer
@@ -212,7 +212,7 @@ struct ContentView: View {
                 }
                 .padding(12)
             }
-            .frame(minHeight: 240)
+            .frame(minHeight: 80, maxHeight: .infinity)
             // Keep the keyboard-selected row visible as it moves.
             .onChange(of: store.selectedServerID) { _, id in
                 guard let id else { return }

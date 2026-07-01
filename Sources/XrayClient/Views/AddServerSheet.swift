@@ -149,7 +149,8 @@ struct SubscriptionSheet: View {
         message = "Fetching…"
         defer { isLoading = false }
         do {
-            let result = try await SubscriptionFetcher.fetch(urlText)
+            let result = try await SubscriptionFetcher.fetch(
+                urlText, hwid: store.settings.sendHwid ? DeviceID.hwid : nil)
             guard !result.servers.isEmpty else {
                 message = "Subscription returned no valid servers."
                 return

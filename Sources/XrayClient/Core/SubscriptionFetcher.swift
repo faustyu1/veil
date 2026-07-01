@@ -10,8 +10,17 @@ enum SubscriptionFetcher {
         var announce: String?       // from Announce header (provider description)
     }
 
-    static func fetch(_ urlString: String) async throws -> Result {
-        guard let url = URL(string: urlString) else {
+    static func fetch(_ urlString: String, hwid: String? = nil) async throws -> Result {
+        guard var components = URLComponents(string: urlString) else {
+            throw LinkParseError.malformed(urlString)
+        }
+        if let hwid, !hwid.isEmpty {
+            var items = components.queryItems ?? []
+            items.removeAll { $0.name == "hwid" }
+            items.append(URLQueryItem(name: "hwid", value: hwid))
+            components.queryItems = items
+        }
+        guard let url = components.url else {
             throw LinkParseError.malformed(urlString)
         }
         var request = URLRequest(url: url)
