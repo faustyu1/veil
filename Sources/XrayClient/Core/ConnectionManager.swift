@@ -134,18 +134,51 @@ final class ConnectionManager {
         let socksHost = ports.listen
         let socksPort = ports.socks
 
-        // Poll the SOCKS inbound until it accepts connections, then bring up the
-        // transport immediately — much faster than a fixed delay.
+        // Poll the SOCKS inbound until it accepts connections, then verify the
+        // tunnel is actually passing traffic end-to-end before bringing up the
+        // transport. This matters most for TUN mode: flipping the system
+        // default route the instant the local SOCKS port merely starts
+        // *listening* races the real REALITY/XHTTP handshake to the remote
+        // server, which can take longer than a plain TCP connect (especially
+        // on the very first connect, before any session/connection reuse).
+        // If that race is lost, the route is already pointed at a tunnel that
+        // isn't passing traffic yet, taking down the whole machine's internet
+        // until it either catches up or the user disconnects. A real
+        // through-the-proxy probe (the same one the watchdog uses) closes
+        // that gap.
         Task.detached(priority: .userInitiated) {
-            let ready = await ConnectionManager.waitForPort(host: socksHost,
-                                                            port: socksPort,
-                                                            timeout: 2.0)
+            let portReady = await ConnectionManager.waitForPort(host: socksHost,
+                                                                 port: socksPort,
+                                                                 timeout: 2.0)
+            guard portReady else {
+                await MainActor.run {
+                    guard self.state == .connecting else { return }
+                    guard self.xray.isRunning else { return } // onExit reports failure
+                    self.xray.stop()
+                    self.fail("xray did not start listening")
+                }
+                return
+            }
+            // End-to-end probe with retries: REALITY/XHTTP handshakes can take
+            // a few seconds longer than a bare TCP connect, particularly on a
+            // cold start. Give it real time before declaring failure.
+            var tunnelReady = false
+            for _ in 0..<15 {
+                if await MainActor.run(body: { self.state == .connecting && self.xray.isRunning }) == false {
+                    return // connection was cancelled/failed out from under us
+                }
+                if await HealthProbe.throughSocks(host: socksHost, port: socksPort, timeout: 2.0) {
+                    tunnelReady = true
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s between attempts
+            }
             await MainActor.run {
                 guard self.state == .connecting else { return }
                 guard self.xray.isRunning else { return } // onExit reports failure
-                guard ready else {
+                guard tunnelReady else {
                     self.xray.stop()
-                    self.fail("xray did not start listening")
+                    self.fail("tunnel did not pass traffic in time")
                     return
                 }
                 self.bringUpTransport(mode: chosenMode,

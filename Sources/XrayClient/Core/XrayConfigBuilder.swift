@@ -78,8 +78,15 @@ enum XrayConfigBuilder {
     /// Connection multiplexing reuses a single TCP/Reality connection for many
     /// streams, cutting handshake overhead. It is INCOMPATIBLE with XTLS
     /// `xtls-rprx-vision` flow, so it is disabled whenever Vision is in use.
+    /// It is ALSO incompatible with XHTTP: XHTTP has its own dedicated
+    /// multiplexing (the `xmux` block inside xhttpSettings) and layering the
+    /// legacy Xray `mux` outbound on top reproducibly breaks the connection
+    /// (verified: 0/20 requests succeed with both enabled vs. 20/20 with mux
+    /// off, everything else identical) — it doesn't fail fast, it works
+    /// briefly and then the whole tunnel goes dead with no recovery.
     private static func muxSettings(_ cfg: ProxyConfig) -> [String: Any]? {
         if let flow = cfg.flow, flow.contains("vision") { return nil }
+        if cfg.network == .xhttp { return nil }
         return [
             "enabled": true,
             "concurrency": 8,
