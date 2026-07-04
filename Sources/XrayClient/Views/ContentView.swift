@@ -563,6 +563,12 @@ struct ServerRow: View {
                 .fill(isActive ? Color.green : Color.secondary.opacity(0.3))
                 .frame(width: 7, height: 7)
             Text(server.name).lineLimit(1)
+            if server.isBalancer {
+                Text("\((server.alternates?.count ?? 0) + 1)")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.15), in: Capsule())
+            }
             Spacer()
             latencyBadge
             Text(server.proto.rawValue.uppercased())

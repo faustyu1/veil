@@ -1,5 +1,7 @@
 import Foundation
 import Observation
+import Network
+import AppKit
 
 enum ConnectionState: Equatable {
     case disconnected
@@ -46,6 +48,14 @@ final class ConnectionManager {
     private var activeMode: TunnelMode = .systemProxy
     private var uptimeTimer: Timer?
 
+    /// Network path monitoring and recovery after sleep / network changes.
+    private var networkMonitor: NWPathMonitor?
+    private var networkRecoveryTask: Task<Void, Never>?
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var isNetworkSatisfied: Bool = true
+    private var isSleeping: Bool = false
+
     /// The server we're currently connected to, kept so the watchdog can
     /// transparently restart the tunnel without user input.
     private var activeServer: ProxyConfig?
@@ -73,6 +83,7 @@ final class ConnectionManager {
                 }
             }
         }
+        setupNetworkMonitoring()
     }
 
     var isConnected: Bool { state == .connected }
@@ -80,9 +91,9 @@ final class ConnectionManager {
     /// Connect to a server. If already connected, switches by restarting only
     /// xray and re-pinning the route — the transport (TUN/proxy) stays up, so a
     /// switch is sub-second and never re-prompts for a password.
-    func connect(to server: ProxyConfig) {
+    func connect(to server: ProxyConfig, forceTransportRefresh: Bool = false) {
         let wasConnected = (state == .connected || state == .connecting)
-        let keepTransport = wasConnected && (activeMode == mode)
+        let keepTransport = wasConnected && (activeMode == mode) && !forceTransportRefresh
 
         activeServer = server
         if wasConnected && !keepTransport {
@@ -130,7 +141,7 @@ final class ConnectionManager {
 
         let chosenMode = mode
         let socksAddr = "\(ports.listen):\(ports.socks)"
-        let serverHost = server.address
+        let serverHosts = server.allAddresses
         let socksHost = ports.listen
         let socksPort = ports.socks
 
@@ -150,7 +161,7 @@ final class ConnectionManager {
                 }
                 self.bringUpTransport(mode: chosenMode,
                                       socksAddr: socksAddr,
-                                      serverHost: serverHost,
+                                      serverHosts: serverHosts,
                                       serverID: server.id,
                                       keepTransport: keepTransport)
             }
@@ -170,7 +181,7 @@ final class ConnectionManager {
     }
 
     private func bringUpTransport(mode: TunnelMode, socksAddr: String,
-                                  serverHost: String, serverID: UUID,
+                                  serverHosts: [String], serverID: UUID,
                                   keepTransport: Bool) {
         switch mode {
         case .systemProxy:
@@ -190,14 +201,15 @@ final class ConnectionManager {
             }
         case .tun:
             // tun2socks keeps running across switches; tun-up.sh fast-path just
-            // re-pins the new server IP (sub-second, no utun re-create).
+            // re-pins the new server IP(s) (sub-second, no utun re-create).
+            // For a balancer group we pin every node so the tunnel never loops.
             Task.detached(priority: .userInitiated) {
-                let ips = TunManager.resolveIPs(host: serverHost)
+                let ips = Set(serverHosts.flatMap { TunManager.resolveIPs(host: $0) })
                 do {
-                    try TunManager.up(socksAddr: socksAddr, serverIPs: ips)
+                    try TunManager.up(socksAddr: socksAddr, serverIPs: Array(ips))
                     await MainActor.run {
                         self.finishConnect(serverID: serverID, mode: mode)
-                        self.appendLog("[info] TUN \(keepTransport ? "re-pinned" : "up") (\(ips.joined(separator: ", ")))\n")
+                        self.appendLog("[info] TUN \(keepTransport ? "re-pinned" : "up") (\(ips.joined(separator: ", ")))")
                     }
                 } catch {
                     await MainActor.run {
@@ -225,6 +237,8 @@ final class ConnectionManager {
     }
 
     func disconnect() {
+        networkRecoveryTask?.cancel()
+        networkRecoveryTask = nil
         let wasConnected = (state == .connected)
         let name = activeServerName
         stopWatchdog()
@@ -259,12 +273,12 @@ final class ConnectionManager {
     /// Restarts the tunnel for the active server without tearing down the
     /// transport or resetting the uptime clock. Used by the watchdog and by the
     /// xray.onExit handler when the link dies unexpectedly.
-    private func reconnect() {
+    private func reconnect(forceTransportRefresh: Bool = false) {
         guard let server = activeServer else { return }
         isReconnecting = true
         // connect() keeps the transport up when the mode is unchanged, so this
         // just relaunches xray and re-pins the route — sub-second, no prompts.
-        connect(to: server)
+        connect(to: server, forceTransportRefresh: forceTransportRefresh)
     }
 
     /// Periodically probes end-to-end connectivity through the SOCKS proxy and
@@ -337,6 +351,141 @@ final class ConnectionManager {
         uptimeTimer = nil
         connectedSince = nil
         uptimeText = ""
+    }
+
+    // MARK: - Sleep / network recovery
+
+    private func setupNetworkMonitoring() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = (path.status == .satisfied)
+            Task { @MainActor in
+                self?.handleNetworkChange(satisfied: satisfied)
+            }
+        }
+        let queue = DispatchQueue(label: "xray.network")
+        monitor.start(queue: queue)
+        networkMonitor = monitor
+
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleWillSleep()
+            }
+        }
+
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleDidWake()
+            }
+        }
+    }
+
+    private func handleNetworkChange(satisfied: Bool) {
+        let wasSatisfied = isNetworkSatisfied
+        isNetworkSatisfied = satisfied
+        if satisfied {
+            if state == .connected { startWatchdog() }
+            if !wasSatisfied && activeServer != nil && !isSleeping {
+                appendLog("[info] network connectivity restored\n")
+                scheduleRecovery(forceTransportRefresh: true, reason: "network restored", delay: 1.0)
+            }
+        } else if !isSleeping {
+            stopWatchdog()
+            appendLog("[info] network connectivity lost\n")
+        }
+    }
+
+    private func handleWillSleep() {
+        isSleeping = true
+        stopWatchdog()
+        appendLog("[info] system going to sleep\n")
+    }
+
+    private func handleDidWake() {
+        isSleeping = false
+        appendLog("[info] system woke up\n")
+        scheduleRecovery(forceTransportRefresh: true, reason: "wake", delay: 2.0)
+    }
+
+    private func scheduleRecovery(forceTransportRefresh: Bool, reason: String, delay: TimeInterval) {
+        networkRecoveryTask?.cancel()
+        networkRecoveryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                self.performRecovery(forceTransportRefresh: forceTransportRefresh, reason: reason)
+            }
+        }
+    }
+
+    private func performRecovery(forceTransportRefresh: Bool, reason: String) {
+        guard autoReconnect, activeServer != nil else { return }
+        guard state != .connecting else { return }
+
+        // Core died while we were asleep/offline: do a full reconnect.
+        if !xray.isRunning {
+            appendLog("[warn] core not running after \(reason) — reconnecting\n")
+            reconnect(forceTransportRefresh: forceTransportRefresh)
+            return
+        }
+
+        // Core is alive. Re-apply transport in case the primary interface changed.
+        if forceTransportRefresh {
+            refreshTransport(reason: reason)
+        }
+
+        // Verify the tunnel actually works; if not, restart the core.
+        let host = ports.listen
+        let port = ports.socks
+        Task.detached(priority: .userInitiated) { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard let self else { return }
+            let alive = await HealthProbe.throughSocks(host: host, port: port, timeout: 5.0)
+            await MainActor.run {
+                guard self.state == .connected, !self.isReconnecting else { return }
+                if !alive {
+                    self.appendLog("[warn] health check failed after \(reason) — reconnecting\n")
+                    self.reconnect(forceTransportRefresh: forceTransportRefresh)
+                }
+            }
+        }
+    }
+
+    private func refreshTransport(reason: String) {
+        guard let server = activeServer else { return }
+        let listen = ports.listen
+        let socks = ports.socks
+        switch activeMode {
+        case .systemProxy:
+            let ok = SystemProxy.enable(socksPort: socks, httpPort: ports.http)
+            appendLog(ok ? "[info] system proxy re-applied after \(reason)\n"
+                        : "[error] could not re-apply system proxy after \(reason)\n")
+        case .tun:
+            let socksAddr = "\(listen):\(socks)"
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else { return }
+                let ips = Set(server.allAddresses.flatMap { TunManager.resolveIPs(host: $0) })
+                do {
+                    try TunManager.up(socksAddr: socksAddr, serverIPs: Array(ips))
+                    await MainActor.run {
+                        self.appendLog("[info] TUN re-pinned after \(reason)\n")
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.appendLog("[error] TUN re-pin failed after \(reason): \(error.localizedDescription)\n")
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Logs

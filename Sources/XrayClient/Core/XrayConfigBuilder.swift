@@ -17,11 +17,14 @@ enum XrayConfigBuilder {
                       ports: InboundPorts = InboundPorts(),
                       rules: [RoutingRule] = [],
                       logLevel: String = "warning") -> [String: Any] {
+        let isBalancer = cfg.isBalancer
+        let proxyOutbounds = outbounds(for: cfg)
+        let balancerTags = isBalancer ? proxyOutbounds.compactMap { $0["tag"] as? String } : []
         return [
             "log": ["loglevel": logLevel],
             "inbounds": inbounds(ports),
-            "outbounds": [outbound(cfg), directOutbound(), blockOutbound()],
-            "routing": routing(rules: rules)
+            "outbounds": proxyOutbounds + [directOutbound(), blockOutbound()],
+            "routing": routing(rules: rules, isBalancer: isBalancer, balancerTags: balancerTags)
         ]
     }
 
@@ -58,7 +61,7 @@ enum XrayConfigBuilder {
 
     // MARK: - Outbound dispatch
 
-    private static func outbound(_ cfg: ProxyConfig) -> [String: Any] {
+    private static func singleOutbound(_ cfg: ProxyConfig, tag: String) -> [String: Any] {
         var out: [String: Any]
         switch cfg.proto {
         case .vless:        out = vlessOutbound(cfg)
@@ -69,10 +72,21 @@ enum XrayConfigBuilder {
             // Handled by the sing-box core, never here. ConnectionManager routes
             // them to SingBoxConfigBuilder; this is only reachable if called
             // directly, so emit a harmless freedom outbound.
-            out = ["tag": "proxy", "protocol": "freedom", "settings": [:]]
+            out = ["protocol": "freedom", "settings": [:]]
         }
+        out["tag"] = tag
         if let mux = muxSettings(cfg) { out["mux"] = mux }
         return out
+    }
+
+    /// Returns the proxy outbounds for a server. For a normal server this is a
+    /// single outbound tagged "proxy"; for a balancer group it emits one
+    /// outbound per node (`proxy-0`, `proxy-1`, …) so the routing balancer can
+    /// distribute traffic across them.
+    private static func outbounds(for cfg: ProxyConfig) -> [[String: Any]] {
+        guard cfg.isBalancer else { return [singleOutbound(cfg, tag: "proxy")] }
+        let nodes = [cfg] + (cfg.alternates ?? [])
+        return nodes.enumerated().map { singleOutbound($1, tag: "proxy-\($0)") }
     }
 
     /// Connection multiplexing reuses a single TCP/Reality connection for many
@@ -96,7 +110,6 @@ enum XrayConfigBuilder {
         ]
         if let flow = cfg.flow, !flow.isEmpty { user["flow"] = flow }
         return [
-            "tag": "proxy",
             "protocol": "vless",
             "settings": [
                 "vnext": [[
@@ -116,7 +129,6 @@ enum XrayConfigBuilder {
             "security": "auto"
         ]
         return [
-            "tag": "proxy",
             "protocol": "vmess",
             "settings": [
                 "vnext": [[
@@ -131,7 +143,6 @@ enum XrayConfigBuilder {
 
     private static func trojanOutbound(_ cfg: ProxyConfig) -> [String: Any] {
         [
-            "tag": "proxy",
             "protocol": "trojan",
             "settings": [
                 "servers": [[
@@ -146,7 +157,6 @@ enum XrayConfigBuilder {
 
     private static func shadowsocksOutbound(_ cfg: ProxyConfig) -> [String: Any] {
         [
-            "tag": "proxy",
             "protocol": "shadowsocks",
             "settings": [
                 "servers": [[
@@ -210,9 +220,16 @@ enum XrayConfigBuilder {
             var x: [String: Any] = ["path": cfg.path ?? "/"]
             if let host = cfg.host, !host.isEmpty { x["host"] = host }
             if let mode = cfg.xhttpMode, !mode.isEmpty { x["mode"] = mode }
+            var extra: [String: Any] = [:]
             if let pad = cfg.xPaddingBytes, !pad.isEmpty {
-                x["extra"] = ["xPaddingBytes": pad]
+                extra["xPaddingBytes"] = pad
             }
+            if let extraRaw = cfg.xhttpExtra,
+               let data = extraRaw.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                for (k, v) in parsed { extra[k] = v }
+            }
+            if !extra.isEmpty { x["extra"] = extra }
             settings["xhttpSettings"] = x
         case .tcp, .kcp, .quic:
             break
@@ -252,13 +269,30 @@ enum XrayConfigBuilder {
     }
 
     /// Builds the routing section from an ordered rule list. The first matching
-    /// rule wins; anything unmatched falls through to the proxy outbound.
-    private static func routing(rules: [RoutingRule]) -> [String: Any] {
-        let ruleList = rules.compactMap { $0.xrayRule() }
-        return [
-            // IPOnDemand resolves domains for geoip matching when needed.
+    /// rule wins. For a balancer group the final catch-all rule uses an Xray
+    /// `balancerTag` so traffic is distributed across all nodes.
+    private static func routing(rules: [RoutingRule],
+                                isBalancer: Bool,
+                                balancerTags: [String] = []) -> [String: Any] {
+        var ruleList = rules.compactMap { $0.xrayRule(useBalancerForProxy: isBalancer) }
+        let finalRule: [String: Any] = [
+            "type": "field",
+            "network": "tcp,udp",
+            isBalancer ? "balancerTag" : "outboundTag": "proxy"
+        ]
+        ruleList.append(finalRule)
+
+        var routing: [String: Any] = [
             "domainStrategy": "IPIfNonMatch",
             "rules": ruleList
         ]
+        if isBalancer && !balancerTags.isEmpty {
+            routing["balancers"] = [[
+                "tag": "proxy",
+                "selector": balancerTags,
+                "strategy": ["type": "random"]
+            ]]
+        }
+        return routing
     }
 }

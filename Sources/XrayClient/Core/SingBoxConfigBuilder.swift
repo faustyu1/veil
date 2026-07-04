@@ -12,6 +12,7 @@ enum SingBoxConfigBuilder {
                       ports: InboundPorts = InboundPorts(),
                       rules: [RoutingRule] = [],
                       logLevel: String = "warning") -> [String: Any] {
+        let isBalancer = cfg.isBalancer
         var dict: [String: Any] = [
             "log": ["level": singBoxLevel(logLevel), "timestamp": true],
             "inbounds": inbounds(ports),
@@ -22,6 +23,10 @@ enum SingBoxConfigBuilder {
         if cfg.proto == .wireguard {
             dict["endpoints"] = [wireguardEndpoint(cfg)]
             dict["outbounds"] = [directOutbound(), blockOutbound()]
+        } else if isBalancer {
+            let proxyOutbounds = outbounds(for: cfg)
+            let tags = proxyOutbounds.compactMap { $0["tag"] as? String }
+            dict["outbounds"] = proxyOutbounds + [urltestOutbound(tags: tags), directOutbound(), blockOutbound()]
         } else {
             dict["outbounds"] = [outbound(cfg), directOutbound(), blockOutbound()]
         }
@@ -74,20 +79,43 @@ enum SingBoxConfigBuilder {
     // MARK: - Outbound dispatch
 
     private static func outbound(_ cfg: ProxyConfig) -> [String: Any] {
+        singleOutbound(cfg, tag: "proxy")
+    }
+
+    private static func singleOutbound(_ cfg: ProxyConfig, tag: String) -> [String: Any] {
+        var out: [String: Any]
         switch cfg.proto {
-        case .hysteria2: return hysteria2Outbound(cfg)
-        case .tuic:      return tuicOutbound(cfg)
-        case .anytls:    return anytlsOutbound(cfg)
+        case .hysteria2: out = hysteria2Outbound(cfg)
+        case .tuic:      out = tuicOutbound(cfg)
+        case .anytls:    out = anytlsOutbound(cfg)
         default:
             // Should never happen — sing-box is only used for QUIC protocols.
-            return ["type": "direct", "tag": "proxy"]
+            out = ["type": "direct"]
         }
+        out["tag"] = tag
+        return out
+    }
+
+    private static func outbounds(for cfg: ProxyConfig) -> [[String: Any]] {
+        guard cfg.isBalancer else { return [singleOutbound(cfg, tag: "proxy")] }
+        let nodes = [cfg] + (cfg.alternates ?? [])
+        return nodes.enumerated().map { singleOutbound($1, tag: "proxy-\($0)") }
+    }
+
+    private static func urltestOutbound(tags: [String]) -> [String: Any] {
+        [
+            "type": "urltest",
+            "tag": "proxy",
+            "outbounds": tags,
+            "url": "http://www.google.com/generate_204",
+            "interval": "1m",
+            "tolerance": 150
+        ]
     }
 
     private static func hysteria2Outbound(_ cfg: ProxyConfig) -> [String: Any] {
         var out: [String: Any] = [
             "type": "hysteria2",
-            "tag": "proxy",
             "server": cfg.address,
             "server_port": cfg.port,
             "password": cfg.password ?? ""
@@ -107,7 +135,6 @@ enum SingBoxConfigBuilder {
     private static func tuicOutbound(_ cfg: ProxyConfig) -> [String: Any] {
         var out: [String: Any] = [
             "type": "tuic",
-            "tag": "proxy",
             "server": cfg.address,
             "server_port": cfg.port,
             "uuid": cfg.uuid ?? "",
@@ -122,7 +149,6 @@ enum SingBoxConfigBuilder {
     private static func anytlsOutbound(_ cfg: ProxyConfig) -> [String: Any] {
         var out: [String: Any] = [
             "type": "anytls",
-            "tag": "proxy",
             "server": cfg.address,
             "server_port": cfg.port,
             "password": cfg.password ?? ""

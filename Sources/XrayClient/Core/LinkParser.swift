@@ -350,11 +350,16 @@ enum LinkParser {
         cfg.serviceName = q["serviceName"]?.removingPercentEncoding ?? q["serviceName"]
         // XHTTP transport (a.k.a. SplitHTTP). `mode` selects the upload strategy.
         cfg.xhttpMode = q["mode"]
+        // XHTTP extra JSON (xmux, xPaddingBytes, etc.) — preserve it verbatim
+        // so the config builder can pass it to the core.
+        if let extraRaw = q["extra"]?.removingPercentEncoding, !extraRaw.isEmpty {
+            cfg.xhttpExtra = extraRaw
+        }
         // Padding can arrive either as a flat `x_padding_bytes` param or nested
         // inside the `extra` JSON object (xPaddingBytes). Prefer the explicit one.
         if let pad = q["x_padding_bytes"] ?? q["xPaddingBytes"] {
             cfg.xPaddingBytes = pad.removingPercentEncoding ?? pad
-        } else if let extraRaw = q["extra"]?.removingPercentEncoding,
+        } else if let extraRaw = cfg.xhttpExtra,
                   let data = extraRaw.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let pad = json["xPaddingBytes"] as? String {

@@ -79,6 +79,7 @@ struct ProxyConfig: Codable, Identifiable, Equatable {
     // xhttp specifics
     var xhttpMode: String?     // "auto" | "packet-up" | "stream-up" | "stream-one"
     var xPaddingBytes: String? // e.g. "100-1000"
+    var xhttpExtra: String?    // raw JSON object with transport extras (xmux, etc.)
 
     // Hysteria2 / TUIC (sing-box core)
     var obfs: String?              // hysteria2 obfs type, e.g. "salamander"
@@ -95,6 +96,19 @@ struct ProxyConfig: Codable, Identifiable, Equatable {
     var localAddresses: [String]?  // interface addresses, e.g. ["10.0.0.2/32"]
     var mtu: Int?
     var reserved: [Int]?           // wireguard reserved bytes (3 ints)
+
+    /// Optional alternate nodes for the same logical server (client-side
+    /// balancer). When set, connecting uses any of these nodes according to the
+    /// active balancer strategy instead of a single fixed address.
+    var alternates: [ProxyConfig]?
+
+    /// True when this entry represents a client-side balancer group.
+    var isBalancer: Bool { !(alternates?.isEmpty ?? true) }
+
+    /// All addresses that belong to this logical server (main + balancer nodes).
+    var allAddresses: [String] {
+        [address] + (alternates?.map(\.address) ?? [])
+    }
 
     /// The core engine that handles this protocol.
     var engine: CoreEngine {

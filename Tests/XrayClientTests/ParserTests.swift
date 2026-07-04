@@ -251,6 +251,28 @@ final class XrayConfigBuilderTests: XCTestCase {
         let extra = xhttp["extra"] as! [String: Any]
         XCTAssertEqual(extra["xPaddingBytes"] as? String, "100-1000")
     }
+
+    func testXHTTPExtraJSONMerged() throws {
+        var cfg = ProxyConfig(name: "t", proto: .vless, address: "1.2.3.4", port: 443)
+        cfg.uuid = "uuid-1"
+        cfg.network = .xhttp
+        cfg.security = .reality
+        cfg.publicKey = "pbk"
+        cfg.sni = "mirror.yandex.ru"
+        cfg.path = "/p.js"
+        cfg.xhttpMode = "auto"
+        cfg.xhttpExtra = #"{"xmux":{"cMaxReuseTimes":"0","maxConcurrency":"8-16"},"xPaddingBytes":"100-200"}"#
+
+        let dict = XrayConfigBuilder.build(for: cfg)
+        let outbounds = dict["outbounds"] as! [[String: Any]]
+        let proxy = outbounds.first { ($0["tag"] as? String) == "proxy" }!
+        let stream = proxy["streamSettings"] as! [String: Any]
+        let xhttp = stream["xhttpSettings"] as! [String: Any]
+        let extra = xhttp["extra"] as! [String: Any]
+        XCTAssertEqual(extra["xPaddingBytes"] as? String, "100-200")
+        let xmux = extra["xmux"] as! [String: Any]
+        XCTAssertEqual(xmux["cMaxReuseTimes"] as? String, "0")
+    }
 }
 
 final class SingBoxConfigBuilderTests: XCTestCase {

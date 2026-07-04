@@ -20,15 +20,17 @@ final class PingTester {
     func test(_ servers: [ProxyConfig], tunActive: Bool = false, timeout: TimeInterval = 3.0) {
         for s in servers { testing.insert(s.id) }
         let targets = servers.map {
-            ($0.id, $0.address, $0.port, $0.pingStrategy, $0.sni, $0.alpn)
+            ($0.id, $0.allAddresses, $0.port, $0.pingStrategy, $0.sni, $0.alpn)
         }
 
         Task.detached(priority: .userInitiated) {
             // Resolve hostnames to IPs and pin them off the tunnel for the test.
             var pinnedIPs: [String] = []
             if tunActive {
-                for (_, host, _, _, _, _) in targets {
-                    pinnedIPs.append(contentsOf: TunManager.resolveIPs(host: host))
+                for (_, hosts, _, _, _, _) in targets {
+                    for host in hosts {
+                        pinnedIPs.append(contentsOf: TunManager.resolveIPs(host: host))
+                    }
                 }
                 // Route manipulation runs a blocking `sudo -n` Process — keep it
                 // off the main thread so the UI stays responsive.
@@ -42,7 +44,8 @@ final class PingTester {
                 var iterator = targets.makeIterator()
 
                 func addNext(_ group: inout TaskGroup<(UUID, Int?)>) {
-                    guard let (id, host, port, strategy, sni, alpn) = iterator.next() else { return }
+                    guard let (id, hosts, port, strategy, sni, alpn) = iterator.next() else { return }
+                    let host = hosts.first ?? ""
                     group.addTask {
                         let ms: Int?
                         switch strategy {

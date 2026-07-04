@@ -34,9 +34,17 @@ struct RoutingRule: Codable, Equatable, Identifiable {
     var enabled: Bool = true
 
     /// Renders to an Xray routing "field" rule, or nil if it has no matchers.
-    func xrayRule() -> [String: Any]? {
+    /// When `useBalancerForProxy` is true and the rule targets the proxy
+    /// outbound, it is emitted as `balancerTag` so traffic flows through the
+    /// Xray balancer instead of a single node.
+    func xrayRule(useBalancerForProxy: Bool = false) -> [String: Any]? {
         guard enabled else { return nil }
-        var dict: [String: Any] = ["type": "field", "outboundTag": outbound.tag]
+        var dict: [String: Any] = ["type": "field"]
+        if outbound == .proxy && useBalancerForProxy {
+            dict["balancerTag"] = outbound.tag
+        } else {
+            dict["outboundTag"] = outbound.tag
+        }
         var hasMatcher = false
         if !domains.isEmpty { dict["domain"] = domains; hasMatcher = true }
         if !ips.isEmpty { dict["ip"] = ips; hasMatcher = true }

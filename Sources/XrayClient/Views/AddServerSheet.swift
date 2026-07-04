@@ -85,7 +85,7 @@ struct AddServerSheet: View {
             errorMessage = "No valid links found. Check the format."
             return
         }
-        store.addManualServers(parsed)
+        store.addManualServers(BalancerGrouper.group(parsed))
         dismiss()
     }
 }
@@ -117,6 +117,7 @@ struct SubscriptionSheet: View {
     @State private var urlText = ""
     @State private var isLoading = false
     @State private var message: String?
+    @State private var showScanner = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -128,6 +129,21 @@ struct SubscriptionSheet: View {
                 .textFieldStyle(.roundedBorder)
             TextField("https://example.com/sub", text: $urlText)
                 .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: 8) {
+                Button {
+                    importFromImage()
+                } label: {
+                    Label("From image…", systemImage: "qrcode")
+                }
+                Button {
+                    showScanner = true
+                } label: {
+                    Label("Scan camera", systemImage: "camera")
+                }
+                Spacer()
+            }
+            .controlSize(.small)
 
             if let message {
                 Text(message).font(.caption).foregroundStyle(.secondary)
@@ -142,6 +158,25 @@ struct SubscriptionSheet: View {
             }
         }
         .padding().frame(width: 480)
+        .sheet(isPresented: $showScanner) {
+            ScannerSheet { scanned in
+                urlText = scanned
+                showScanner = false
+            }
+        }
+    }
+
+    /// Opens an image file and decodes a QR-code link from it.
+    private func importFromImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .image]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let payload = QRCode.decode(fileURL: url) else {
+            message = "No QR code found in that image."
+            return
+        }
+        urlText = payload
     }
 
     private func fetch() async {

@@ -43,7 +43,7 @@ enum SubscriptionFetcher {
         guard let body = String(data: data, encoding: .utf8) else {
             throw LinkParseError.malformed("subscription: non-text response")
         }
-        let servers = decode(body)
+        let servers = BalancerGrouper.group(decode(body))
 
         var info: SubscriptionUserinfo.Info?
         var title: String?
