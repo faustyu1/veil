@@ -1,3 +1,7 @@
+// macOS-only: sing-box is the second bundled core. The iOS build ships
+// Xray-core alone, so protocols that need sing-box are unavailable there
+// (see ProxyConfig.xraySupported).
+#if os(macOS)
 import Foundation
 
 /// Builds a sing-box JSON configuration from a `ProxyConfig`.
@@ -255,3 +259,4 @@ enum SingBoxConfigBuilder {
         return hasMatcher ? r : nil
     }
 }
+#endif

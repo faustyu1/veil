@@ -1,0 +1,448 @@
+import SwiftUI
+
+struct ContentView: View {
+    @Environment(ServerStore.self) private var store
+    @Environment(TunnelController.self) private var tunnel
+    @Environment(PingTester.self) private var pinger
+    @Environment(Loc.self) private var loc
+
+    @State private var showAddSheet = false
+    @State private var showSubSheet = false
+    @State private var showSettings = false
+    @State private var showLog = false
+    @State private var isRefreshing = false
+    @State private var searchText = ""
+    @State private var aliveOnly = false
+    @State private var sortByPing = false
+    @State private var qrServer: ProxyConfig?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section { StatusCard() .listRowInsets(EdgeInsets()) }
+
+                if !store.allServers.isEmpty {
+                    Section { filterRow }
+                }
+
+                if store.subscriptions.isEmpty {
+                    Section { emptyState }
+                } else {
+                    ForEach(store.subscriptions) { sub in
+                        SubscriptionSection(subscription: sub,
+                                            searchText: searchText,
+                                            aliveOnly: aliveOnly,
+                                            sortByPing: sortByPing,
+                                            qrServer: $qrServer)
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Veil")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: loc("Search servers…"))
+            .refreshable { await refreshAll() }
+            .toolbar { toolbarContent }
+            .sheet(isPresented: $showAddSheet) { AddServerView() }
+            .sheet(isPresented: $showSubSheet) { SubscriptionView() }
+            .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showLog) { LogView() }
+            .sheet(item: $qrServer) { QRDisplayView(server: $0) }
+        }
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Menu {
+                Button { showSubSheet = true } label: {
+                    Label(loc("Add Subscription"), systemImage: "arrow.down.circle")
+                }
+                Button { showAddSheet = true } label: {
+                    Label(loc("Paste Link"), systemImage: "link")
+                }
+            } label: {
+                Image(systemName: "plus")
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button {
+                    Task { await refreshAll() }
+                } label: {
+                    Label(loc("Refresh"), systemImage: "arrow.clockwise")
+                }
+                .disabled(isRefreshing)
+
+                Button {
+                    pinger.test(store.allServers)
+                } label: {
+                    Label(loc("Test Ping"), systemImage: "speedometer")
+                }
+                .disabled(store.allServers.isEmpty)
+
+                Divider()
+
+                Button { showLog = true } label: {
+                    Label(loc("Log"), systemImage: "text.alignleft")
+                }
+                Button { showSettings = true } label: {
+                    Label(loc("Settings"), systemImage: "gearshape")
+                }
+            } label: {
+                if isRefreshing {
+                    ProgressView()
+                } else {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+    }
+
+    // MARK: - Pieces
+
+    private var filterRow: some View {
+        HStack(spacing: 10) {
+            Toggle(loc("Alive"), isOn: $aliveOnly)
+                .toggleStyle(.button)
+                .buttonStyle(.bordered)
+                .font(.footnote)
+            Toggle(loc("By ping"), isOn: $sortByPing)
+                .toggleStyle(.button)
+                .buttonStyle(.bordered)
+                .font(.footnote)
+            Spacer()
+            Button {
+                pinger.test(store.allServers)
+            } label: {
+                Label(loc("Test Ping"), systemImage: "speedometer")
+                    .font(.footnote)
+            }
+            .buttonStyle(.bordered)
+            .disabled(store.allServers.isEmpty)
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "tray")
+                .font(.system(size: 34))
+                .foregroundStyle(.secondary)
+            Text(loc("No servers yet")).font(.headline)
+            Text(loc("Add a subscription or paste a link to get started."))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            HStack {
+                Button(loc("Add Subscription")) { showSubSheet = true }
+                    .buttonStyle(.bordered)
+                Button(loc("Paste Link")) { showAddSheet = true }
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+        .listRowBackground(Color.clear)
+    }
+
+    private func refreshAll() async {
+        isRefreshing = true
+        await SubscriptionService.refreshAll(store)
+        isRefreshing = false
+    }
+
+    /// Shared filter/sort so every list on screen agrees on the ordering.
+    static func filterServers(_ servers: [ProxyConfig], search: String,
+                              aliveOnly: Bool, sortByPing: Bool,
+                              pinger: PingTester) -> [ProxyConfig] {
+        var list = servers
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        if !q.isEmpty {
+            list = list.filter { $0.name.lowercased().contains(q)
+                || $0.address.lowercased().contains(q) }
+        }
+        if aliveOnly {
+            list = list.filter {
+                if let outer = pinger.latency(for: $0.id), outer != nil { return true }
+                return false
+            }
+        }
+        if sortByPing {
+            list.sort { a, b in
+                let la = (pinger.latency(for: a.id) ?? nil) ?? Int.max
+                let lb = (pinger.latency(for: b.id) ?? nil) ?? Int.max
+                return la < lb
+            }
+        }
+        return list
+    }
+}
+
+// MARK: - Status card
+
+/// The connect/disconnect hero at the top of the list: state, active server,
+/// uptime and live traffic counters read back from the tunnel provider.
+struct StatusCard: View {
+    @Environment(ServerStore.self) private var store
+    @Environment(TunnelController.self) private var tunnel
+    @Environment(Loc.self) private var loc
+
+    private var selected: ProxyConfig? { store.server(withID: store.selectedServerID) }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(statusColor.opacity(0.16))
+                    .frame(width: 96, height: 96)
+                Image(systemName: tunnel.isConnected ? "shield.lefthalf.filled" : "shield.slash")
+                    .font(.system(size: 40, weight: .medium))
+                    .foregroundStyle(statusColor)
+            }
+            .padding(.top, 8)
+
+            VStack(spacing: 4) {
+                Text(stateLabel)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(statusColor)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            if tunnel.isConnected {
+                HStack(spacing: 20) {
+                    trafficLabel(icon: "arrow.up", bytes: tunnel.uplinkBytes)
+                    trafficLabel(icon: "arrow.down", bytes: tunnel.downlinkBytes)
+                    Label(tunnel.uptimeText, systemImage: "clock")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            connectButton
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 18)
+    }
+
+    private func trafficLabel(icon: String, bytes: Int64) -> some View {
+        Label(ByteFormat.string(bytes), systemImage: icon)
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var connectButton: some View {
+        if tunnel.isConnected || tunnel.state == .connecting {
+            Button(role: .destructive) {
+                tunnel.disconnect()
+            } label: {
+                Label(loc("Disconnect"), systemImage: "stop.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(.red)
+        } else {
+            Button {
+                guard let server = selected else { return }
+                Task { await tunnel.connect(to: server, settings: store.settings) }
+            } label: {
+                Label(loc("Connect"), systemImage: "bolt.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(selected == nil || !(selected?.xraySupported ?? false))
+        }
+    }
+
+    private var stateLabel: String {
+        switch tunnel.state {
+        case .disconnected: return loc("Disconnected")
+        case .connecting:   return loc("Connecting…")
+        case .connected:    return loc("Connected")
+        case .failed:       return loc("Failed")
+        }
+    }
+
+    private var subtitle: String {
+        if case .failed(let message) = tunnel.state { return message }
+        if tunnel.isConnected { return tunnel.activeServerName }
+        if let selected {
+            return selected.xraySupported
+                ? selected.name
+                : "\(selected.name) — \(loc("not supported on iOS"))"
+        }
+        return loc("Select a server")
+    }
+
+    private var statusColor: Color {
+        switch tunnel.state {
+        case .connected:    return .green
+        case .connecting:   return .orange
+        case .failed:       return .red
+        case .disconnected: return .secondary
+        }
+    }
+}
+
+// MARK: - Subscription section
+
+struct SubscriptionSection: View {
+    @Environment(ServerStore.self) private var store
+    @Environment(TunnelController.self) private var tunnel
+    @Environment(PingTester.self) private var pinger
+    @Environment(Loc.self) private var loc
+
+    let subscription: Subscription
+    let searchText: String
+    let aliveOnly: Bool
+    let sortByPing: Bool
+    @Binding var qrServer: ProxyConfig?
+
+    private var visibleServers: [ProxyConfig] {
+        ContentView.filterServers(subscription.servers, search: searchText,
+                                  aliveOnly: aliveOnly, sortByPing: sortByPing,
+                                  pinger: pinger)
+    }
+
+    /// Hide a group that an active filter has emptied out.
+    private var isHidden: Bool {
+        (!searchText.isEmpty || aliveOnly) && visibleServers.isEmpty
+    }
+
+    var body: some View {
+        if !isHidden {
+            Section {
+                if !subscription.isCollapsed {
+                    ForEach(visibleServers) { server in
+                        row(for: server)
+                    }
+                }
+            } header: {
+                header
+            } footer: {
+                footer
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(for server: ProxyConfig) -> some View {
+        let isActive = tunnel.activeServerID == server.id && tunnel.isConnected
+        ServerRow(server: server,
+                  isSelected: store.selectedServerID == server.id,
+                  isActive: isActive,
+                  latency: pinger.latency(for: server.id),
+                  isTesting: pinger.isTesting(server.id))
+            .contentShape(Rectangle())
+            .onTapGesture { handleTap(server) }
+            .contextMenu {
+                Button(tunnel.isConnected ? loc("Switch here") : loc("Connect")) {
+                    store.select(server.id)
+                    Task { await tunnel.connect(to: server, settings: store.settings) }
+                }
+                .disabled(!server.xraySupported)
+                Button(loc("Test ping")) { pinger.test([server]) }
+                Divider()
+                Button(loc("Copy link")) {
+                    UIPasteboard.general.string = LinkBuilder.link(for: server)
+                }
+                Button(loc("Show QR code")) { qrServer = server }
+            }
+            .swipeActions(edge: .trailing) {
+                if subscription.isManual && !isActive {
+                    Button(role: .destructive) {
+                        store.removeServer(id: server.id)
+                    } label: {
+                        Label(loc("Delete"), systemImage: "trash")
+                    }
+                }
+            }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Button {
+                store.toggleCollapsed(id: subscription.id)
+            } label: {
+                Image(systemName: subscription.isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .frame(width: 20)
+            }
+            .buttonStyle(.plain)
+
+            Text(subscription.name)
+            Text("\(subscription.servers.count)")
+                .font(.caption2)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(Capsule().fill(Color.secondary.opacity(0.18)))
+
+            Spacer()
+
+            Menu {
+                Button(loc("Test ping")) { pinger.test(subscription.servers) }
+                if !subscription.isManual {
+                    Divider()
+                    Button(loc("Refresh now")) {
+                        Task { await SubscriptionService.refresh(subscription, into: store) }
+                    }
+                    Toggle(loc("Auto-update"), isOn: Binding(
+                        get: { subscription.autoUpdate },
+                        set: { store.setAutoUpdate($0, id: subscription.id) }
+                    ))
+                    Divider()
+                    let holdsActive = tunnel.isConnected
+                        && subscription.servers.contains { $0.id == tunnel.activeServerID }
+                    Button(loc("Remove"), role: .destructive) {
+                        store.removeSubscription(id: subscription.id)
+                    }
+                    .disabled(holdsActive)
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
+        .textCase(nil)
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let note = subscription.note, !note.isEmpty {
+                Text(note)
+            }
+            if let used = subscription.usedBytes, let total = subscription.totalBytes {
+                HStack(spacing: 6) {
+                    Text("\(ByteFormat.string(used)) / \(ByteFormat.string(total))")
+                    if let expiry = subscription.expiresAt {
+                        Text("· \(expiry.formatted(date: .abbreviated, time: .omitted))")
+                    }
+                }
+                if let fraction = subscription.usageFraction {
+                    ProgressView(value: fraction)
+                        .tint(fraction > 0.9 ? .red : .accentColor)
+                }
+            } else if let expiry = subscription.expiresAt {
+                Text("\(loc("Expires")) \(expiry.formatted(date: .abbreviated, time: .omitted))")
+            }
+        }
+    }
+
+    /// Disconnected: tap selects. Connected: tap switches straight away, which
+    /// only restarts the core inside the extension — the tunnel never drops.
+    private func handleTap(_ server: ProxyConfig) {
+        store.select(server.id)
+        guard tunnel.isConnected else { return }
+        Task { await tunnel.connect(to: server, settings: store.settings) }
+    }
+}

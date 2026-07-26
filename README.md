@@ -27,6 +27,25 @@ A native macOS VPN client for the [Xray-core](https://github.com/XTLS/Xray-core)
 - **Localized** in 12 languages: English, Русский, 中文, Español, हिन्दी, العربية, Français, Português, Deutsch, 日本語, Bahasa Indonesia, Türkçe.
 - **Safe shutdown** — restores routes/DNS on quit and recovers from a crashed previous session so you're never left without internet.
 
+## iOS
+
+This branch also contains the iPhone/iPad app (`ios/`), built on Apple's
+**NetworkExtension** so all traffic on the device is tunnelled. It ships
+**Xray-core only** — no tun2socks and no second core: Xray's own layer-3 `tun`
+inbound takes the utun descriptor straight from `NEPacketTunnelProvider`.
+
+It shares its entire model and core layer with the Mac app (`Sources/XrayClient/`),
+so parsers, config builder, subscriptions, routing and localization behave
+identically on both platforms.
+
+```bash
+Scripts/ios/build-xraycore.sh              # Xray-core -> XrayCore.xcframework
+Scripts/ios/build-app.sh simulator Release
+```
+
+See **[docs/ios.md](docs/ios.md)** for the packet path, signing requirements and
+the app↔extension protocol.
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later

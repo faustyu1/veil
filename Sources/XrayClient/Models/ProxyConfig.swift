@@ -110,11 +110,22 @@ struct ProxyConfig: Codable, Identifiable, Equatable {
         [address] + (alternates?.map(\.address) ?? [])
     }
 
-    /// The core engine that handles this protocol.
+    /// The core engine that handles this protocol on macOS, where both cores
+    /// are bundled. WireGuard is handled by sing-box there because its endpoint
+    /// model is a better fit for the desktop routing setup.
     var engine: CoreEngine {
         switch proto {
         case .vless, .vmess, .trojan, .shadowsocks:        return .xray
         case .hysteria2, .tuic, .wireguard, .anytls:       return .singbox
+        }
+    }
+
+    /// Whether Xray-core alone can run this protocol. The iOS build ships no
+    /// second core, so entries where this is false cannot be connected there.
+    var xraySupported: Bool {
+        switch proto {
+        case .vless, .vmess, .trojan, .shadowsocks, .wireguard: return true
+        case .hysteria2, .tuic, .anytls:                        return false
         }
     }
 
