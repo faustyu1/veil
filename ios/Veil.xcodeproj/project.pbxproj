@@ -42,6 +42,7 @@
 		AA00000000000000000033 /* Veil.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veil.entitlements; sourceTree = "<group>"; };
 		AA00000000000000000034 /* VeilTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VeilTunnel.entitlements; sourceTree = "<group>"; };
 		AA00000000000000000035 /* Tunnel-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Tunnel-Info.plist"; sourceTree = "<group>"; };
+		AA00000000000000000036 /* App-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "App-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -130,6 +131,7 @@
 				AA00000000000000000033 /* Veil.entitlements */,
 				AA00000000000000000034 /* VeilTunnel.entitlements */,
 				AA00000000000000000035 /* Tunnel-Info.plist */,
+				AA00000000000000000036 /* App-Info.plist */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -339,6 +341,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Veil;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Veil uses the camera to scan server and subscription QR codes.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -361,6 +364,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Config/App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Veil;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Veil uses the camera to scan server and subscription QR codes.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

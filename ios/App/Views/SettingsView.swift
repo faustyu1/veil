@@ -19,7 +19,7 @@ struct SettingsView: View {
                     // traffic, and it is the one this app uses.
                     LabeledContent(loc("Mode"), value: loc("Network Extension (all apps)"))
                     Picker(loc("Log level"), selection: $store.settings.logLevel) {
-                        ForEach(LogLevel.allCases) { Text($0.title).tag($0) }
+                        ForEach(LogLevel.allCases) { Text(loc($0.title)).tag($0) }
                     }
                     Toggle(loc("IPv6 inside tunnel"), isOn: $store.settings.ipv6Enabled)
                     Stepper(value: $store.settings.tunnelMTU, in: 1280...1500, step: 20) {
@@ -42,7 +42,7 @@ struct SettingsView: View {
                     NavigationLink {
                         RoutingView()
                     } label: {
-                        LabeledContent(loc("Rules"), value: store.settings.routingPreset.title)
+                        LabeledContent(loc("Rules"), value: loc(store.settings.routingPreset.title))
                     }
                 }
 
@@ -69,7 +69,7 @@ struct SettingsView: View {
 
                 Section(loc("Appearance")) {
                     Picker(loc("Theme"), selection: $store.settings.appearance) {
-                        ForEach(AppAppearance.allCases) { Text($0.title).tag($0) }
+                        ForEach(AppAppearance.allCases) { Text(loc($0.title)).tag($0) }
                     }
                     Picker(loc("Language"), selection: $store.settings.language) {
                         ForEach(AppLanguage.allCases) { Text($0.displayName).tag($0) }

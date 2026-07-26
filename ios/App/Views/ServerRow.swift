@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ServerRow: View {
+    @Environment(Loc.self) private var loc
+
     let server: ProxyConfig
     let isSelected: Bool
     let isActive: Bool
@@ -24,7 +26,7 @@ struct ServerRow: View {
                         Text("×\((server.alternates?.count ?? 0) + 1)")
                     }
                     if !server.xraySupported {
-                        Text("needs sing-box")
+                        Text(loc("needs sing-box"))
                             .foregroundStyle(.orange)
                     }
                 }
@@ -55,7 +57,7 @@ struct ServerRow: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(latencyColor(ms))
             } else {
-                Text("timeout")
+                Text(loc("timeout"))
                     .font(.caption2)
                     .foregroundStyle(.red)
             }

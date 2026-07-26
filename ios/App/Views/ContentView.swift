@@ -132,9 +132,14 @@ struct ContentView: View {
             Button {
                 showAddSheet = true
             } label: {
+                // Without an explicit label style the button drops the icon and
+                // shows a bare word.
                 Label(loc("Add"), systemImage: "plus")
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 8)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)

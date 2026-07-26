@@ -55,12 +55,19 @@ struct AddView: View {
                     PhotosPicker(selection: $photoItem, matching: .images) {
                         Label(fromImageTitle, systemImage: "photo")
                     }
-                    Button {
-                        if let clipboard = UIPasteboard.general.string {
-                            append(clipboard)
-                        }
-                    } label: {
+                    // A system paste button rather than reading
+                    // UIPasteboard ourselves: that would pop the "Allow Paste?"
+                    // alert on every tap, and a denied alert looks exactly like
+                    // a broken button.
+                    HStack {
                         Label(loc("Paste from clipboard"), systemImage: "doc.on.clipboard")
+                        Spacer()
+                        PasteButton(payloadType: String.self) { strings in
+                            guard let pasted = strings.first else { return }
+                            append(pasted)
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonBorderShape(.capsule)
                     }
                 }
 
@@ -106,9 +113,11 @@ struct AddView: View {
     private var detectionFooter: some View {
         switch input {
         case .servers(let servers):
+            // Never interpolate a count into a translated noun — plural forms
+            // differ per language. "Label: N" reads correctly everywhere.
             Label(servers.count == 1
                   ? "\(loc("Server")): \(servers[0].name)"
-                  : "\(servers.count) \(loc("servers detected"))",
+                  : "\(loc("Servers found")): \(servers.count)",
                   systemImage: "checkmark.circle")
                 .foregroundStyle(.green)
         case .subscription(let url):

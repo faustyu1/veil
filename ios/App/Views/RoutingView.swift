@@ -8,6 +8,10 @@ struct RoutingView: View {
     @Environment(Loc.self) private var loc
 
     @State private var geo = GeoAssetManager.shared
+    /// Drives edit mode by hand instead of using `EditButton`: system controls
+    /// draw their own title from the *device* language, which would ignore the
+    /// language picked in this app's settings.
+    @State private var isEditing = false
 
     var body: some View {
         @Bindable var store = store
@@ -15,11 +19,11 @@ struct RoutingView: View {
         Form {
             Section(loc("Preset")) {
                 Picker(loc("Preset"), selection: $store.settings.routingPreset) {
-                    ForEach(RoutingPreset.allCases) { Text($0.title).tag($0) }
+                    ForEach(RoutingPreset.allCases) { Text(loc($0.title)).tag($0) }
                 }
                 .pickerStyle(.inline)
                 .labelsHidden()
-                Text(store.settings.routingPreset.subtitle)
+                Text(loc(store.settings.routingPreset.subtitle))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -31,7 +35,7 @@ struct RoutingView: View {
             if store.settings.routingPreset.needsGeoAssets || store.settings.blockAds {
                 Section {
                     Picker(loc("Source"), selection: $store.settings.geoSource) {
-                        ForEach(GeoAssetSource.allCases) { Text($0.title).tag($0) }
+                        ForEach(GeoAssetSource.allCases) { Text(loc($0.title)).tag($0) }
                     }
                     if store.settings.geoSource == .custom {
                         TextField("geoip.dat URL", text: $store.settings.customGeoipURL)
@@ -95,7 +99,12 @@ struct RoutingView: View {
         }
         .navigationTitle(loc("Routing"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { EditButton() }
+        .environment(\.editMode, .constant(isEditing ? .active : .inactive))
+        .toolbar {
+            if store.settings.routingPreset == .custom {
+                Button(isEditing ? loc("Done") : loc("Edit")) { isEditing.toggle() }
+            }
+        }
         .onDisappear { store.save() }
     }
 }
@@ -111,7 +120,7 @@ private struct RuleEditor: View {
     var body: some View {
         DisclosureGroup {
             Picker(loc("Outbound"), selection: $rule.outbound) {
-                ForEach(RuleOutbound.allCases) { Text($0.title).tag($0) }
+                ForEach(RuleOutbound.allCases) { Text(loc($0.title)).tag($0) }
             }
             .pickerStyle(.segmented)
 
@@ -147,7 +156,7 @@ private struct RuleEditor: View {
             HStack {
                 Text(rule.name.isEmpty ? loc("Untitled rule") : rule.name)
                 Spacer()
-                Text(rule.outbound.title)
+                Text(loc(rule.outbound.title))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
