@@ -346,8 +346,6 @@ struct SubscriptionSection: View {
     let sortByPing: Bool
     @Binding var qrServer: ProxyConfig?
 
-    @State private var isNoteExpanded = false
-
     private var visibleServers: [ProxyConfig] {
         ContentView.filterServers(subscription.servers, search: searchText,
                                   aliveOnly: aliveOnly, sortByPing: sortByPing,
@@ -471,32 +469,34 @@ struct SubscriptionSection: View {
         }
     }
 
-    /// The Announce header usually arrives padded with blank lines. They cost
-    /// the whole two-line preview, so drop them and keep the real breaks.
+    /// Shown in full. Providers pad the Announce header with runs of blank
+    /// lines; those collapse to a single break so the paragraphs survive
+    /// without the dead space between them.
     private var noteText: String {
-        (subscription.note ?? "")
-            .split(whereSeparator: \.isNewline)
+        let lines = (subscription.note ?? "")
+            .split(separator: "\n", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
+
+        var kept: [String] = []
+        for line in lines {
+            // Drops leading blanks and every repeat of one.
+            if line.isEmpty && (kept.last?.isEmpty ?? true) { continue }
+            kept.append(line)
+        }
+        while kept.last?.isEmpty == true { kept.removeLast() }
+        return kept.joined(separator: "\n")
     }
 
     @ViewBuilder
     private var details: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !noteText.isEmpty {
-                // Providers put whole adverts in the Announce header; two lines
-                // is enough of a preview, tap to read the rest.
                 Text(noteText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(isNoteExpanded ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        withAnimation(.snappy(duration: 0.25)) { isNoteExpanded.toggle() }
-                    }
+                    .textSelection(.enabled)
             }
 
             if let used = subscription.usedBytes, let total = subscription.totalBytes {
