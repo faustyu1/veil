@@ -346,6 +346,8 @@ struct SubscriptionSection: View {
     let sortByPing: Bool
     @Binding var qrServer: ProxyConfig?
 
+    @State private var isNoteExpanded = false
+
     private var visibleServers: [ProxyConfig] {
         ContentView.filterServers(subscription.servers, search: searchText,
                                   aliveOnly: aliveOnly, sortByPing: sortByPing,
@@ -359,14 +361,16 @@ struct SubscriptionSection: View {
 
     var body: some View {
         if !isHidden {
+            // The heading is the section's first *row*, not its header, so it
+            // shares the one rounded card the list draws around a section
+            // instead of floating on its own slab next to it.
             Section {
+                header
                 if !subscription.isCollapsed {
                     ForEach(visibleServers) { server in
                         row(for: server)
                     }
                 }
-            } header: {
-                header
             }
         }
     }
@@ -405,21 +409,15 @@ struct SubscriptionSection: View {
             }
     }
 
-    /// Name, note, traffic and expiry all sit above the servers: a description
-    /// under the last row reads as if it belonged to that row. The whole block
-    /// gets the same card treatment as the rows so it reads as one group.
+    /// Name, note, traffic and expiry sit above the servers: a description
+    /// under the last row reads as if it belonged to that row.
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             titleRow
             details
         }
-        .textCase(nil)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 6, trailing: 0))
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 
     private var titleRow: some View {
@@ -473,34 +471,71 @@ struct SubscriptionSection: View {
         }
     }
 
+    /// The Announce header usually arrives padded with blank lines. They cost
+    /// the whole two-line preview, so drop them and keep the real breaks.
+    private var noteText: String {
+        (subscription.note ?? "")
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
     @ViewBuilder
     private var details: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let note = subscription.note, !note.isEmpty {
-                Text(note)
+        VStack(alignment: .leading, spacing: 8) {
+            if !noteText.isEmpty {
+                // Providers put whole adverts in the Announce header; two lines
+                // is enough of a preview, tap to read the rest.
+                Text(noteText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(isNoteExpanded ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            if let used = subscription.usedBytes, let total = subscription.totalBytes {
-                HStack(spacing: 6) {
-                    Text("\(ByteFormat.string(used)) / \(ByteFormat.string(total))")
-                    if let expiry = subscription.expiresAt {
-                        Text("· \(expiry.formatted(date: .abbreviated, time: .omitted))")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.snappy(duration: 0.25)) { isNoteExpanded.toggle() }
                     }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                if let fraction = subscription.usageFraction {
-                    ProgressView(value: fraction)
-                        .tint(fraction > 0.9 ? .red : .accentColor)
+            }
+
+            if let used = subscription.usedBytes, let total = subscription.totalBytes {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text("\(ByteFormat.string(used)) / \(ByteFormat.string(total))")
+                            .monospacedDigit()
+                        Spacer(minLength: 8)
+                        if let expiry = subscription.expiresAt {
+                            Text(expiry.formatted(date: .abbreviated, time: .omitted))
+                        }
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                    if let fraction = subscription.usageFraction {
+                        usageBar(fraction)
+                    }
                 }
             } else if let expiry = subscription.expiresAt {
                 Text("\(loc("Expires")) \(expiry.formatted(date: .abbreviated, time: .omitted))")
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Hand-drawn rather than a `ProgressView`, whose bar is too tall and too
+    /// loud for a line of metadata.
+    private func usageBar(_ fraction: Double) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.18))
+                Capsule()
+                    .fill(fraction > 0.9 ? Color.red : Color.accentColor)
+                    .frame(width: max(3, geometry.size.width * fraction))
+            }
+        }
+        .frame(height: 4)
     }
 
     private func toggleCollapsed() {
