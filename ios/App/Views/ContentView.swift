@@ -109,8 +109,13 @@ struct ContentView: View {
             Button {
                 pinger.test(store.allServers)
             } label: {
-                Label(loc("Test Ping"), systemImage: "speedometer")
-                    .font(.footnote)
+                // An HStack rather than a Label: the button style lays a Label
+                // out on a fixed icon column, which leaves a gap here.
+                HStack(spacing: 5) {
+                    Image(systemName: "speedometer")
+                    Text(loc("Test Ping"))
+                }
+                .font(.footnote)
             }
             .buttonStyle(.bordered)
             .disabled(store.allServers.isEmpty)
@@ -189,20 +194,16 @@ struct StatusCard: View {
     @Environment(TunnelController.self) private var tunnel
     @Environment(Loc.self) private var loc
 
+    @State private var holdProgress: CGFloat = 0
+    @State private var isHolding = false
+
     private var selected: ProxyConfig? { store.server(withID: store.selectedServerID) }
 
     var body: some View {
         // Kept compact on purpose: this sits above the server list, and every
         // point it takes is a row the user has to scroll for.
         VStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(0.16))
-                    .frame(width: 68, height: 68)
-                Image(systemName: tunnel.isConnected ? "shield.lefthalf.filled" : "shield.slash")
-                    .font(.system(size: 28, weight: .medium))
-                    .foregroundStyle(statusColor)
-            }
+            shieldControl
 
             VStack(spacing: 2) {
                 Text(stateLabel)
@@ -224,43 +225,81 @@ struct StatusCard: View {
                 }
             }
 
-            connectButton
+            Text(holdHint)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.vertical, 16)
+    }
+
+    /// The shield *is* the connect control — hold it to toggle the tunnel.
+    /// A deliberate press beats a button you can hit by accident, since
+    /// dropping the VPN mid-session is disruptive.
+    private var shieldControl: some View {
+        ZStack {
+            Circle()
+                .fill(statusColor.opacity(0.16))
+                .frame(width: 104, height: 104)
+
+            // Fills while held; completing the ring is what fires the action.
+            Circle()
+                .trim(from: 0, to: holdProgress)
+                .stroke(statusColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .frame(width: 104, height: 104)
+
+            Image(systemName: tunnel.isConnected ? "shield.lefthalf.filled" : "shield.slash")
+                .font(.system(size: 40, weight: .medium))
+                .foregroundStyle(statusColor)
+        }
+        .opacity(canToggle ? 1 : 0.4)
+        .scaleEffect(isHolding ? 0.93 : 1)
+        .animation(.easeOut(duration: 0.15), value: isHolding)
+        .contentShape(Circle())
+        .onLongPressGesture(minimumDuration: Self.holdDuration) {
+            toggle()
+        } onPressingChanged: { pressing in
+            guard canToggle else { return }
+            isHolding = pressing
+            withAnimation(.linear(duration: pressing ? Self.holdDuration : 0.2)) {
+                holdProgress = pressing ? 1 : 0
+            }
+        }
+        .accessibilityLabel(holdHint)
+    }
+
+    private static let holdDuration: TimeInterval = 0.6
+
+    /// False while a connect is already in flight, or when the selected server
+    /// is one the Xray-only build cannot run.
+    private var canToggle: Bool {
+        if tunnel.isConnected { return true }
+        guard tunnel.state != .connecting else { return false }
+        return selected?.xraySupported ?? false
+    }
+
+    private var holdHint: String {
+        if !canToggle && !tunnel.isConnected { return " " }
+        return tunnel.isConnected ? loc("Hold to disconnect") : loc("Hold to connect")
+    }
+
+    private func toggle() {
+        guard canToggle else { return }
+        withAnimation(.easeOut(duration: 0.2)) { holdProgress = 0 }
+        isHolding = false
+        if tunnel.isConnected {
+            tunnel.disconnect()
+        } else if let server = selected {
+            Task { await tunnel.connect(to: server, settings: store.settings) }
+        }
     }
 
     private func trafficLabel(icon: String, bytes: Int64) -> some View {
         Label(ByteFormat.string(bytes), systemImage: icon)
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
-    }
-
-    @ViewBuilder
-    private var connectButton: some View {
-        if tunnel.isConnected || tunnel.state == .connecting {
-            Button(role: .destructive) {
-                tunnel.disconnect()
-            } label: {
-                Label(loc("Disconnect"), systemImage: "stop.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(.red)
-        } else {
-            Button {
-                guard let server = selected else { return }
-                Task { await tunnel.connect(to: server, settings: store.settings) }
-            } label: {
-                Label(loc("Connect"), systemImage: "bolt.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(selected == nil || !(selected?.xraySupported ?? false))
-        }
     }
 
     private var stateLabel: String {
@@ -328,8 +367,6 @@ struct SubscriptionSection: View {
                 }
             } header: {
                 header
-            } footer: {
-                footer
             }
         }
     }
@@ -368,7 +405,18 @@ struct SubscriptionSection: View {
             }
     }
 
+    /// Name, note, traffic and expiry all sit above the servers: a description
+    /// under the last row reads as if it belonged to that row.
     private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            titleRow
+            details
+        }
+        .textCase(nil)
+        .padding(.bottom, 2)
+    }
+
+    private var titleRow: some View {
         HStack(spacing: 8) {
             Button {
                 store.toggleCollapsed(id: subscription.id)
@@ -410,14 +458,16 @@ struct SubscriptionSection: View {
                 Image(systemName: "ellipsis.circle")
             }
         }
-        .textCase(nil)
     }
 
     @ViewBuilder
-    private var footer: some View {
+    private var details: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let note = subscription.note, !note.isEmpty {
                 Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let used = subscription.usedBytes, let total = subscription.totalBytes {
                 HStack(spacing: 6) {
@@ -426,12 +476,16 @@ struct SubscriptionSection: View {
                         Text("· \(expiry.formatted(date: .abbreviated, time: .omitted))")
                     }
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 if let fraction = subscription.usageFraction {
                     ProgressView(value: fraction)
                         .tint(fraction > 0.9 ? .red : .accentColor)
                 }
             } else if let expiry = subscription.expiresAt {
                 Text("\(loc("Expires")) \(expiry.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

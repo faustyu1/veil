@@ -783,5 +783,13 @@ extension Loc {
             "ru": "Изменить", "zh": "编辑", "es": "Editar", "hi": "संपादित करें",
             "ar": "تحرير", "fr": "Modifier", "pt": "Editar", "de": "Bearbeiten",
             "ja": "編集", "id": "Ubah", "tr": "Düzenle"],
+        "Hold to connect": [
+            "ru": "Удерживайте, чтобы подключить", "zh": "长按以连接", "es": "Mantén pulsado para conectar", "hi": "कनेक्ट करने के लिए दबाए रखें",
+            "ar": "اضغط مطولًا للاتصال", "fr": "Maintenez pour connecter", "pt": "Mantenha pressionado para conectar", "de": "Zum Verbinden gedrückt halten",
+            "ja": "長押しで接続", "id": "Tahan untuk menghubungkan", "tr": "Bağlanmak için basılı tutun"],
+        "Hold to disconnect": [
+            "ru": "Удерживайте, чтобы отключить", "zh": "长按以断开", "es": "Mantén pulsado para desconectar", "hi": "डिस्कनेक्ट करने के लिए दबाए रखें",
+            "ar": "اضغط مطولًا لقطع الاتصال", "fr": "Maintenez pour déconnecter", "pt": "Mantenha pressionado para desconectar", "de": "Zum Trennen gedrückt halten",
+            "ja": "長押しで切断", "id": "Tahan untuk memutuskan", "tr": "Bağlantıyı kesmek için basılı tutun"],
     ]
 }
