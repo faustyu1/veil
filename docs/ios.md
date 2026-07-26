@@ -112,8 +112,11 @@ To work in Xcode, open `ios/Veil.xcodeproj` after step 1.
 
 ## Signing and capabilities
 
-Running the tunnel on a real device needs a paid Apple Developer account. The
-App ID for **both** the app and the extension must have:
+Running the tunnel on a real device needs a paid Apple Developer account —
+there is no way around it, and no re-signing tool can substitute for it. See
+[Why there is no iOS build to download yet](../README.md#why-there-is-no-ios-build-to-download-yet).
+
+The App ID for **both** the app and the extension must have:
 
 - **Network Extensions** → `packet-tunnel-provider`
 - **App Groups** → `group.dev.local.veil`

@@ -46,6 +46,40 @@ Scripts/ios/build-app.sh simulator Release
 See **[docs/ios.md](docs/ios.md)** for the packet path, signing requirements and
 the app↔extension protocol.
 
+### Why there is no iOS build to download yet
+
+The tunnel needs the `packet-tunnel-provider` Network Extension entitlement.
+Apple only issues that entitlement through a **paid Apple Developer Program
+membership** ($99/year) — a free personal team cannot provision it.
+
+**Please don't try to sign the app with an ordinary certificate.** It will not
+work, and the failure is confusing rather than obvious:
+
+- Sign it with a free personal team and signing fails outright — the
+  entitlement is rejected, because entitlements have to be authorised by a
+  provisioning profile Apple issued.
+- Strip the entitlement to make it build and the app installs and launches
+  fine, but the VPN never starts: `NETunnelProviderManager` refuses the
+  configuration, and you get an error with no obvious cause.
+
+Re-signing tools that rely on free accounts (AltStore, Sideloadly and friends)
+hit the same wall, for the same reason — none of them can grant an entitlement
+Apple has not issued.
+
+So the app is buildable from source by anyone who already has a paid account,
+but there is no signed build to hand out until the membership is funded.
+
+**Raising the money for the Apple Developer Program membership.** If you'd like
+to help, TON:
+
+```
+UQDsbwQEaspICRDSW4oSNmL0PXxDlnfkiMuqoUbK7ufiCVXj
+```
+
+Nothing in the app is paywalled and none of this changes the licence — it is
+MIT either way. The membership only buys the ability to ship a build that iOS
+will actually run.
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later
