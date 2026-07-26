@@ -1,3 +1,7 @@
+// macOS-only: this file drives the system proxy / tun2socks / a bundled
+// core subprocess, none of which exist on iOS. The iOS build runs Xray
+// in-process inside the NetworkExtension instead (see ios/Tunnel).
+#if os(macOS)
 import Foundation
 
 /// Safe replacement for the SPM-synthesized `Bundle.module`.
@@ -142,3 +146,4 @@ final class XrayProcess {
         process = nil
     }
 }
+#endif

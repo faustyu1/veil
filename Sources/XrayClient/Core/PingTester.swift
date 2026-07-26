@@ -24,6 +24,7 @@ final class PingTester {
         }
 
         Task.detached(priority: .userInitiated) {
+            #if os(macOS)
             // Resolve hostnames to IPs and pin them off the tunnel for the test.
             var pinnedIPs: [String] = []
             if tunActive {
@@ -38,6 +39,7 @@ final class PingTester {
                 // Give the routing table a moment to settle.
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
+            #endif
 
             await withTaskGroup(of: (UUID, Int?).self) { group in
                 let maxConcurrent = 16
@@ -86,9 +88,11 @@ final class PingTester {
                 if !pending.isEmpty { await self.applyResults(pending) }
             }
 
+            #if os(macOS)
             if tunActive {
                 TunManager.pingRouteDel()
             }
+            #endif
         }
     }
 

@@ -27,6 +27,59 @@ A native macOS VPN client for the [Xray-core](https://github.com/XTLS/Xray-core)
 - **Localized** in 12 languages: English, Русский, 中文, Español, हिन्दी, العربية, Français, Português, Deutsch, 日本語, Bahasa Indonesia, Türkçe.
 - **Safe shutdown** — restores routes/DNS on quit and recovers from a crashed previous session so you're never left without internet.
 
+## iOS
+
+This branch also contains the iPhone/iPad app (`ios/`), built on Apple's
+**NetworkExtension** so all traffic on the device is tunnelled. It ships
+**Xray-core only** — no tun2socks and no second core: Xray's own layer-3 `tun`
+inbound takes the utun descriptor straight from `NEPacketTunnelProvider`.
+
+It shares its entire model and core layer with the Mac app (`Sources/XrayClient/`),
+so parsers, config builder, subscriptions, routing and localization behave
+identically on both platforms.
+
+```bash
+Scripts/ios/build-xraycore.sh              # Xray-core -> XrayCore.xcframework
+Scripts/ios/build-app.sh simulator Release
+```
+
+See **[docs/ios.md](docs/ios.md)** for the packet path, signing requirements and
+the app↔extension protocol.
+
+### Why there is no iOS build to download yet
+
+The tunnel needs the `packet-tunnel-provider` Network Extension entitlement.
+Apple only issues that entitlement through a **paid Apple Developer Program
+membership** ($99/year) — a free personal team cannot provision it.
+
+**Please don't try to sign the app with an ordinary certificate.** It will not
+work, and the failure is confusing rather than obvious:
+
+- Sign it with a free personal team and signing fails outright — the
+  entitlement is rejected, because entitlements have to be authorised by a
+  provisioning profile Apple issued.
+- Strip the entitlement to make it build and the app installs and launches
+  fine, but the VPN never starts: `NETunnelProviderManager` refuses the
+  configuration, and you get an error with no obvious cause.
+
+Re-signing tools that rely on free accounts (AltStore, Sideloadly and friends)
+hit the same wall, for the same reason — none of them can grant an entitlement
+Apple has not issued.
+
+So the app is buildable from source by anyone who already has a paid account,
+but there is no signed build to hand out until the membership is funded.
+
+**Raising the money for the Apple Developer Program membership.** If you'd like
+to help, TON:
+
+```
+UQDsbwQEaspICRDSW4oSNmL0PXxDlnfkiMuqoUbK7ufiCVXj
+```
+
+Nothing in the app is paywalled and none of this changes the licence — it is
+MIT either way. The membership only buys the ability to ship a build that iOS
+will actually run.
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later

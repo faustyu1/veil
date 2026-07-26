@@ -1,8 +1,11 @@
 import Foundation
 import Observation
 import Network
-import AppKit
 
+// The macOS coordinator drives an out-of-process core plus the system proxy or
+// tun2socks. iOS has neither: there the tunnel lives in a NetworkExtension and
+// is driven by `TunnelController` (ios/App), which speaks to the provider over
+// NETunnelProviderSession. `ConnectionState` is shared by both.
 enum ConnectionState: Equatable {
     case disconnected
     case connecting
@@ -18,6 +21,9 @@ enum ConnectionState: Equatable {
         }
     }
 }
+
+#if os(macOS)
+import AppKit
 
 /// Top-level coordinator: owns the xray process, the active transport mode
 /// (system proxy or TUN), uptime tracking, and logs.
@@ -500,3 +506,4 @@ final class ConnectionManager {
         }
     }
 }
+#endif

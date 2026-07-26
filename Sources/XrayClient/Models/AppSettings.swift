@@ -79,6 +79,13 @@ struct AppSettings: Codable, Equatable {
     // Subscription
     var sendHwid: Bool = true
 
+    // Tunnel shape. Only the iOS build reads these — there the whole tunnel is
+    // Xray's own layer-3 inbound behind NetworkExtension, so the interface MTU,
+    // the address families we claim and the resolver are ours to pick.
+    var tunnelMTU: Int = 1500
+    var ipv6Enabled: Bool = true
+    var dnsServers: [String] = ["1.1.1.1", "8.8.8.8"]
+
     init() {}
 
     /// Resilient decoding: any missing key falls back to its default so old
@@ -108,6 +115,18 @@ struct AppSettings: Codable, Equatable {
         launchAtLogin = get(.launchAtLogin, false)
         notifyOnConnect = get(.notifyOnConnect, false)
         sendHwid = get(.sendHwid, true)
+        tunnelMTU = get(.tunnelMTU, 1500)
+        ipv6Enabled = get(.ipv6Enabled, true)
+        dnsServers = get(.dnsServers, ["1.1.1.1", "8.8.8.8"])
+    }
+
+    /// DNS servers to hand the tunnel, never empty — an empty resolver list
+    /// would leave the device with no way to resolve anything at all.
+    var effectiveDNSServers: [String] {
+        let cleaned = dnsServers
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return cleaned.isEmpty ? ["1.1.1.1", "8.8.8.8"] : cleaned
     }
 
     /// The ordered routing rules to feed Xray, derived from the active preset

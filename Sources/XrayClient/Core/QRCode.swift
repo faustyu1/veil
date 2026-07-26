@@ -1,12 +1,30 @@
 import Foundation
 import CoreImage
+
+#if canImport(AppKit)
 import AppKit
+typealias PlatformImage = NSImage
+#elseif canImport(UIKit)
+import UIKit
+typealias PlatformImage = UIImage
+#endif
 
 /// QR-code generation and decoding helpers built on CoreImage.
 enum QRCode {
 
-    /// Renders `string` into a crisp QR-code NSImage of roughly `size` points.
-    static func image(from string: String, size: CGFloat = 240) -> NSImage? {
+    /// Renders `string` into a crisp QR-code image of roughly `size` points.
+    static func image(from string: String, size: CGFloat = 240) -> PlatformImage? {
+        guard let cg = cgImage(from: string, size: size) else { return nil }
+        #if canImport(AppKit)
+        return NSImage(cgImage: cg, size: NSSize(width: size, height: size))
+        #else
+        return UIImage(cgImage: cg)
+        #endif
+    }
+
+    /// The raw CGImage behind `image(from:size:)`, handy when the caller wants
+    /// the bitmap itself rather than a view-ready image.
+    static func cgImage(from string: String, size: CGFloat = 240) -> CGImage? {
         let data = Data(string.utf8)
         guard let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
         filter.setValue(data, forKey: "inputMessage")
@@ -18,15 +36,18 @@ enum QRCode {
         let scale = size / output.extent.width
         let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
-        let context = CIContext()
-        guard let cg = context.createCGImage(scaled, from: scaled.extent) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: size, height: size))
+        return CIContext().createCGImage(scaled, from: scaled.extent)
     }
 
     /// Detects and returns the first QR-code payload found in an image, if any.
-    static func decode(from image: NSImage) -> String? {
+    static func decode(from image: PlatformImage) -> String? {
+        #if canImport(AppKit)
         guard let tiff = image.tiffRepresentation,
               let ci = CIImage(data: tiff) else { return nil }
+        #else
+        guard let cg = image.cgImage else { return nil }
+        let ci = CIImage(cgImage: cg)
+        #endif
         return decode(ciImage: ci)
     }
 

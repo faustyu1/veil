@@ -21,11 +21,17 @@ final class GeoAssetManager {
 
     init() {
         let fm = FileManager.default
+        #if os(iOS)
+        // Shared app group: the app downloads the .dat files, the tunnel
+        // extension is the one that actually reads them.
+        let dir = AppGroup.geoDirectory
+        #else
         let base = (try? fm.url(for: .applicationSupportDirectory,
                                 in: .userDomainMask,
                                 appropriateFor: nil,
                                 create: true)) ?? fm.temporaryDirectory
         let dir = base.appendingPathComponent("XrayClient/geo", isDirectory: true)
+        #endif
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.directory = dir
         refreshState()

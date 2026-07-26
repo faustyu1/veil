@@ -7,25 +7,81 @@ struct InboundPorts {
     let listen: String = "127.0.0.1"
 }
 
+/// How traffic reaches the core.
+///
+/// macOS runs Xray as a subprocess and feeds it through local SOCKS/HTTP
+/// inbounds (the system proxy or tun2socks points at them). iOS runs Xray
+/// inside the NetworkExtension and hands it the utun descriptor directly, so
+/// there the core uses its own layer-3 `tun` inbound and there is no local
+/// proxy hop at all.
+enum XrayInbound {
+    case localProxy(InboundPorts)
+    case tun(name: String, mtu: Int)
+}
+
 /// Builds an Xray-core JSON configuration from a `ProxyConfig`.
 ///
-/// Produces two inbounds (SOCKS5 + HTTP) on localhost and one outbound for the
-/// selected server, plus a direct outbound for routing rules.
+/// Produces the requested inbound plus one outbound for the selected server and
+/// direct/block outbounds for routing rules.
 enum XrayConfigBuilder {
 
     static func build(for cfg: ProxyConfig,
                       ports: InboundPorts = InboundPorts(),
                       rules: [RoutingRule] = [],
                       logLevel: String = "warning") -> [String: Any] {
+        build(for: cfg, inbound: .localProxy(ports), rules: rules, logLevel: logLevel)
+    }
+
+    /// - Parameters:
+    ///   - inbound: local SOCKS/HTTP proxy, or Xray's native layer-3 TUN.
+    ///   - logFile: when set, the core appends its error log here instead of
+    ///     stderr — the only way to read logs out of a NetworkExtension.
+    ///   - dnsServers: when non-empty, an Xray `dns` section is emitted and all
+    ///     port-53 traffic is answered by the core. Needed in TUN mode, where
+    ///     the OS resolver's queries arrive as raw packets.
+    ///   - stats: enables traffic counters on the proxy outbound.
+    static func build(for cfg: ProxyConfig,
+                      inbound: XrayInbound,
+                      rules: [RoutingRule] = [],
+                      logLevel: String = "warning",
+                      logFile: String? = nil,
+                      dnsServers: [String] = [],
+                      stats: Bool = false) -> [String: Any] {
         let isBalancer = cfg.isBalancer
         let proxyOutbounds = outbounds(for: cfg)
         let balancerTags = isBalancer ? proxyOutbounds.compactMap { $0["tag"] as? String } : []
-        return [
-            "log": ["loglevel": logLevel],
-            "inbounds": inbounds(ports),
-            "outbounds": proxyOutbounds + [directOutbound(), blockOutbound()],
-            "routing": routing(rules: rules, isBalancer: isBalancer, balancerTags: balancerTags)
+
+        var log: [String: Any] = ["loglevel": logLevel]
+        if let logFile, !logFile.isEmpty {
+            log["error"] = logFile
+            log["access"] = "none"
+        }
+
+        var auxOutbounds = [directOutbound(), blockOutbound()]
+        if !dnsServers.isEmpty { auxOutbounds.append(dnsOutbound()) }
+
+        var config: [String: Any] = [
+            "log": log,
+            "inbounds": inbounds(inbound),
+            "outbounds": proxyOutbounds + auxOutbounds,
+            "routing": routing(rules: rules,
+                               isBalancer: isBalancer,
+                               balancerTags: balancerTags,
+                               hasDNS: !dnsServers.isEmpty)
         ]
+        if !dnsServers.isEmpty {
+            config["dns"] = ["servers": dnsServers, "queryStrategy": "UseIP"]
+        }
+        if stats {
+            config["stats"] = [String: Any]()
+            config["policy"] = [
+                "system": [
+                    "statsOutboundUplink": true,
+                    "statsOutboundDownlink": true
+                ]
+            ]
+        }
+        return config
     }
 
     static func jsonData(for cfg: ProxyConfig,
@@ -37,9 +93,30 @@ enum XrayConfigBuilder {
                                           options: [.prettyPrinted, .sortedKeys])
     }
 
+    static func jsonString(for cfg: ProxyConfig,
+                           inbound: XrayInbound,
+                           rules: [RoutingRule] = [],
+                           logLevel: String = "warning",
+                           logFile: String? = nil,
+                           dnsServers: [String] = [],
+                           stats: Bool = false) throws -> String {
+        let dict = build(for: cfg, inbound: inbound, rules: rules, logLevel: logLevel,
+                         logFile: logFile, dnsServers: dnsServers, stats: stats)
+        let data = try JSONSerialization.data(withJSONObject: dict,
+                                              options: [.prettyPrinted, .sortedKeys])
+        return String(decoding: data, as: UTF8.self)
+    }
+
     // MARK: - Inbounds
 
-    private static func inbounds(_ p: InboundPorts) -> [[String: Any]] {
+    private static func inbounds(_ inbound: XrayInbound) -> [[String: Any]] {
+        switch inbound {
+        case .localProxy(let p):  return proxyInbounds(p)
+        case .tun(let name, let mtu): return [tunInbound(name: name, mtu: mtu)]
+        }
+    }
+
+    private static func proxyInbounds(_ p: InboundPorts) -> [[String: Any]] {
         [
             [
                 "tag": "socks-in",
@@ -59,6 +136,25 @@ enum XrayConfigBuilder {
         ]
     }
 
+    /// Xray's own layer-3 inbound. It ignores `listen`/`port` and instead reads
+    /// raw IP packets from the interface — on iOS from the descriptor published
+    /// through the `xray.tun.fd` environment flag by the tunnel provider.
+    /// Sniffing is what lets domain-based routing rules still work when all the
+    /// core sees is IP packets.
+    private static func tunInbound(name: String, mtu: Int) -> [String: Any] {
+        [
+            "tag": "tun-in",
+            "port": 0,
+            "protocol": "tun",
+            "settings": ["name": name, "MTU": mtu],
+            "sniffing": [
+                "enabled": true,
+                "destOverride": ["http", "tls", "quic"],
+                "routeOnly": false
+            ]
+        ]
+    }
+
     // MARK: - Outbound dispatch
 
     private static func singleOutbound(_ cfg: ProxyConfig, tag: String) -> [String: Any] {
@@ -68,14 +164,17 @@ enum XrayConfigBuilder {
         case .vmess:        out = vmessOutbound(cfg)
         case .trojan:       out = trojanOutbound(cfg)
         case .shadowsocks:  out = shadowsocksOutbound(cfg)
-        case .hysteria2, .tuic, .wireguard, .anytls:
+        case .wireguard:    out = wireguardOutbound(cfg)
+        case .hysteria2, .tuic, .anytls:
             // Handled by the sing-box core, never here. ConnectionManager routes
             // them to SingBoxConfigBuilder; this is only reachable if called
             // directly, so emit a harmless freedom outbound.
             out = ["protocol": "freedom", "settings": [:]]
         }
         out["tag"] = tag
-        if let mux = muxSettings(cfg) { out["mux"] = mux }
+        // WireGuard carries its own transport; stream settings and mux do not
+        // apply to it.
+        if cfg.proto != .wireguard, let mux = muxSettings(cfg) { out["mux"] = mux }
         return out
     }
 
@@ -168,6 +267,27 @@ enum XrayConfigBuilder {
             ],
             "streamSettings": streamSettings(cfg)
         ]
+    }
+
+    /// Xray's native WireGuard outbound. Used by the iOS build, where Xray is
+    /// the only core; macOS routes WireGuard through sing-box instead.
+    private static func wireguardOutbound(_ cfg: ProxyConfig) -> [String: Any] {
+        var peer: [String: Any] = [
+            "endpoint": "\(cfg.address):\(cfg.port)",
+            "publicKey": cfg.peerPublicKey ?? "",
+            "keepAlive": 25
+        ]
+        if let psk = cfg.presharedKey, !psk.isEmpty { peer["preSharedKey"] = psk }
+
+        var settings: [String: Any] = [
+            "secretKey": cfg.privateKey ?? "",
+            "address": cfg.localAddresses ?? ["10.0.0.2/32"],
+            "peers": [peer]
+        ]
+        if let mtu = cfg.mtu, mtu > 0 { settings["mtu"] = mtu }
+        if let reserved = cfg.reserved, !reserved.isEmpty { settings["reserved"] = reserved }
+
+        return ["protocol": "wireguard", "settings": settings]
     }
 
     // MARK: - Stream settings (transport + security)
@@ -268,13 +388,31 @@ enum XrayConfigBuilder {
         ["tag": "block", "protocol": "blackhole", "settings": [:]]
     }
 
+    /// Answers DNS queries from the core's own `dns` section instead of letting
+    /// them travel as opaque UDP. Only emitted alongside a `dns` config.
+    private static func dnsOutbound() -> [String: Any] {
+        ["tag": "dns-out", "protocol": "dns", "settings": [:]]
+    }
+
     /// Builds the routing section from an ordered rule list. The first matching
     /// rule wins. For a balancer group the final catch-all rule uses an Xray
     /// `balancerTag` so traffic is distributed across all nodes.
     private static func routing(rules: [RoutingRule],
                                 isBalancer: Bool,
-                                balancerTags: [String] = []) -> [String: Any] {
-        var ruleList = rules.compactMap { $0.xrayRule(useBalancerForProxy: isBalancer) }
+                                balancerTags: [String] = [],
+                                hasDNS: Bool = false) -> [String: Any] {
+        var ruleList: [[String: Any]] = []
+        // DNS first: in TUN mode the resolver's queries arrive as plain UDP
+        // packets, and we want the core to answer them (and to fetch the answer
+        // through the tunnel) rather than forwarding them verbatim.
+        if hasDNS {
+            ruleList.append([
+                "type": "field",
+                "port": "53",
+                "outboundTag": "dns-out"
+            ])
+        }
+        ruleList += rules.compactMap { $0.xrayRule(useBalancerForProxy: isBalancer) }
         let finalRule: [String: Any] = [
             "type": "field",
             "network": "tcp,udp",

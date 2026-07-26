@@ -1,6 +1,8 @@
 import Foundation
-import ServiceManagement
 import UserNotifications
+
+#if os(macOS)
+import ServiceManagement
 
 /// Manages the "launch at login" state via the modern SMAppService API
 /// (macOS 13+). Registering adds the app as a login item; unregistering removes
@@ -33,6 +35,7 @@ enum LoginItem {
         }
     }
 }
+#endif
 
 /// Thin wrapper around UNUserNotificationCenter for connection status alerts.
 @MainActor

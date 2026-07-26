@@ -14,11 +14,17 @@ final class ServerStore {
 
     init() {
         let fm = FileManager.default
+        #if os(iOS)
+        // Live in the shared app group so the tunnel extension reads the same
+        // servers and settings the app writes.
+        let dir = AppGroup.supportDirectory
+        #else
         let base = (try? fm.url(for: .applicationSupportDirectory,
                                 in: .userDomainMask,
                                 appropriateFor: nil,
                                 create: true)) ?? fm.temporaryDirectory
         let dir = base.appendingPathComponent("XrayClient", isDirectory: true)
+        #endif
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("store.json")
         load()
