@@ -116,6 +116,15 @@
   .pills{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:22px}
   .pill{font-size:13px;color:var(--mut);border:1px solid var(--line);border-radius:20px;padding:6px 14px}
 
+  /* Support */
+  .donate{margin-top:28px;display:flex;flex-direction:column;gap:16px;align-items:center}
+  .addr{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center;
+        background:#0a0a10;border:1px solid var(--line);border-radius:14px;padding:14px 18px;max-width:100%}
+  .addr .chain{font-size:12px;font-weight:700;letter-spacing:.06em;color:#c4b5fd}
+  .addr code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+             color:var(--txt);word-break:break-all;text-align:left}
+  .addr button{padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
+
   footer{border-top:1px solid var(--line);padding:40px 0;color:var(--mut);font-size:13px;text-align:center}
   footer a{color:#c4b5fd}
   .disc{max-width:680px;margin:14px auto 0;font-size:12px;color:#6b6b7d}
@@ -140,6 +149,7 @@
       <a href="#features" class="hide-sm" data-en>Features</a><a href="#features" class="hide-sm" data-ru>Возможности</a>
       <a href="#routing" class="hide-sm" data-en>Routing</a><a href="#routing" class="hide-sm" data-ru>Маршрутизация</a>
       <a href="#download" data-en>Download</a><a href="#download" data-ru>Скачать</a>
+      <a href="#support" data-en>Support</a><a href="#support" data-ru>Поддержать</a>
       <div class="lang">
         <button id="b-en" class="on" onclick="setLang('en')">EN</button>
         <button id="b-ru" onclick="setLang('ru')">RU</button>
@@ -336,6 +346,32 @@
   </div>
 </section>
 
+<section id="support" class="dl">
+  <div class="wrap">
+    <h2 data-en>Support the iOS build</h2><h2 data-ru>Поддержать iOS-сборку</h2>
+    <div class="box">
+      <p class="lead" style="margin-top:0" data-en>The iPhone app is written and builds today, but iOS will not run a VPN tunnel without the Network Extension entitlement — and Apple only issues that with a paid Developer Program membership ($99&nbsp;a&nbsp;year). Raising it is the only thing standing between the code and a build you can install.</p>
+      <p class="lead" style="margin-top:0" data-ru>Приложение для iPhone уже написано и собирается, но iOS не запустит VPN-туннель без разрешения Network Extension — а его Apple выдаёт только с платным членством в Developer Program ($99&nbsp;в&nbsp;год). Собрать эту сумму — единственное, что отделяет код от сборки, которую можно поставить.</p>
+
+      <div class="donate">
+        <div class="addr">
+          <span class="chain">TON</span>
+          <code id="ton">UQDsbwQEaspICRDSW4oSNmL0PXxDlnfkiMuqoUbK7ufiCVXj</code>
+          <button class="btn btn-s" onclick="copyTon(this)" data-en>Copy</button>
+          <button class="btn btn-s" onclick="copyTon(this)" data-ru>Копировать</button>
+        </div>
+        <div class="cta" style="margin-top:0">
+          <a class="btn btn-p" href="https://pay.cloudtips.ru/p/a207bf02" target="_blank" rel="noopener" data-en>Donate in RUB — CloudTips</a>
+          <a class="btn btn-p" href="https://pay.cloudtips.ru/p/a207bf02" target="_blank" rel="noopener" data-ru>Поддержать в рублях — CloudTips</a>
+        </div>
+      </div>
+
+      <p class="meta" data-en>Nothing in Veil is paywalled and the licence stays MIT either way. The membership only buys the ability to ship a build that iOS will actually run.</p>
+      <p class="meta" data-ru>Ничего в Veil не закрыто платно, и лицензия в любом случае остаётся MIT. Членство покупает только возможность выпустить сборку, которую iOS реально запустит.</p>
+    </div>
+  </div>
+</section>
+
 <footer>
   <div class="wrap">
     <p>Veil · <a href="https://github.com/faustyu1/veil">GitHub</a> · <a href="https://github.com/faustyu1/veil/releases">Releases</a> · MIT License</p>
@@ -347,6 +383,29 @@
 </footer>
 
 <script>
+  function copyTon(btn){
+    var addr = document.getElementById('ton').textContent.trim();
+    var done = function(){
+      var was = btn.textContent;
+      btn.textContent = (document.documentElement.lang === 'ru') ? 'Скопировано' : 'Copied';
+      setTimeout(function(){ btn.textContent = was; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(addr).then(done, function(){ selectTon(); });
+    } else {
+      // No clipboard API (or an insecure origin): select it so the address
+      // can still be copied by hand.
+      selectTon();
+    }
+  }
+  function selectTon(){
+    var range = document.createRange();
+    range.selectNodeContents(document.getElementById('ton'));
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
   function setLang(l){
     l = (l === 'ru') ? 'ru' : 'en';
     document.documentElement.lang = l;

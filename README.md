@@ -70,11 +70,10 @@ So the app is buildable from source by anyone who already has a paid account,
 but there is no signed build to hand out until the membership is funded.
 
 **Raising the money for the Apple Developer Program membership.** If you'd like
-to help, TON:
+to help:
 
-```
-UQDsbwQEaspICRDSW4oSNmL0PXxDlnfkiMuqoUbK7ufiCVXj
-```
+- **TON** — `UQDsbwQEaspICRDSW4oSNmL0PXxDlnfkiMuqoUbK7ufiCVXj`
+- **RUB** — [CloudTips](https://pay.cloudtips.ru/p/a207bf02)
 
 Nothing in the app is paywalled and none of this changes the licence — it is
 MIT either way. The membership only buys the ability to ship a build that iOS
