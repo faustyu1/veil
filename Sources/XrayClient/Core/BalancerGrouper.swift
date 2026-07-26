@@ -9,24 +9,24 @@ enum BalancerGrouper {
     /// Groups servers by normalized name, protocol and auth key. Servers that do
     /// not share a bucket are returned unchanged.
     static func group(_ servers: [ProxyConfig]) -> [ProxyConfig] {
+        // Bucket order follows first appearance, not the dictionary's hash
+        // order — otherwise the server list reshuffles on every refresh.
+        var order: [String] = []
         var buckets: [String: [ProxyConfig]] = [:]
         for server in servers {
             let key = groupKey(for: server)
+            if buckets[key] == nil { order.append(key) }
             buckets[key, default: []].append(server)
         }
 
-        var result: [ProxyConfig] = []
-        for group in buckets.values {
-            guard group.count > 1 else {
-                result.append(group[0])
-                continue
-            }
+        return order.map { key in
+            let group = buckets[key]!
+            guard group.count > 1 else { return group[0] }
             var main = group[0]
             main.name = baseName(main.name)
             main.alternates = Array(group.dropFirst())
-            result.append(main)
+            return main
         }
-        return result
     }
 
     private static func groupKey(for server: ProxyConfig) -> String {

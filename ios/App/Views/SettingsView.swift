@@ -25,10 +25,13 @@ struct SettingsView: View {
                     Stepper(value: $store.settings.tunnelMTU, in: 1280...1500, step: 20) {
                         LabeledContent("MTU", value: "\(store.settings.tunnelMTU)")
                     }
-                    TextField("1.1.1.1, 8.8.8.8", text: $dnsText)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .onSubmit(commitDNS)
+                    LabeledContent("DNS") {
+                        TextField("1.1.1.1, 8.8.8.8", text: $dnsText)
+                            .multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .onSubmit(commitDNS)
+                    }
                 } header: {
                     Text(loc("Tunnel"))
                 } footer: {

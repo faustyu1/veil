@@ -54,6 +54,25 @@ tester and localization are the *same files* the desktop app uses — platform
 differences are handled with `#if os(macOS)`, so there is one source of truth
 and `swift test` covers both.
 
+## Adding servers
+
+There is one entry point, not a "link vs. subscription" choice. Whatever the
+user pastes, scans or picks from the photo library goes through
+`AddInputClassifier` (in `Sources/XrayClient/Core/AddInput.swift`), which
+recognises:
+
+- share links, one per line (`vless://`, `vmess://`, `trojan://`, `ss://`,
+  `wireguard://` …) — balancer members are folded together before they land in
+  the store;
+- a wg-quick `[Interface]` profile pasted whole;
+- a subscription URL, plain or base64-wrapped the way some panels hand it out;
+- a base64 subscription *body*, for users who paste the payload instead of the
+  address.
+
+The sheet reports what it recognised before the user commits, and the confirm
+button stays disabled for anything it cannot place. The classifier lives in the
+shared Core layer and is covered by `AddInputTests`.
+
 ## Protocols
 
 Everything Xray-core can do on its own:

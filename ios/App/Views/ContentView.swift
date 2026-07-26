@@ -7,7 +7,6 @@ struct ContentView: View {
     @Environment(Loc.self) private var loc
 
     @State private var showAddSheet = false
-    @State private var showSubSheet = false
     @State private var showSettings = false
     @State private var showLog = false
     @State private var isRefreshing = false
@@ -43,8 +42,7 @@ struct ContentView: View {
             .searchable(text: $searchText, prompt: loc("Search servers…"))
             .refreshable { await refreshAll() }
             .toolbar { toolbarContent }
-            .sheet(isPresented: $showAddSheet) { AddServerView() }
-            .sheet(isPresented: $showSubSheet) { SubscriptionView() }
+            .sheet(isPresented: $showAddSheet) { AddView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(isPresented: $showLog) { LogView() }
             .sheet(item: $qrServer) { QRDisplayView(server: $0) }
@@ -56,16 +54,10 @@ struct ContentView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Menu {
-                Button { showSubSheet = true } label: {
-                    Label(loc("Add Subscription"), systemImage: "arrow.down.circle")
-                }
-                Button { showAddSheet = true } label: {
-                    Label(loc("Paste Link"), systemImage: "link")
-                }
-            } label: {
+            Button { showAddSheet = true } label: {
                 Image(systemName: "plus")
             }
+            .accessibilityLabel(loc("Add"))
         }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
@@ -133,16 +125,16 @@ struct ContentView: View {
                 .font(.system(size: 34))
                 .foregroundStyle(.secondary)
             Text(loc("No servers yet")).font(.headline)
-            Text(loc("Add a subscription or paste a link to get started."))
+            Text(loc("Paste a server link or a subscription URL to get started."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            HStack {
-                Button(loc("Add Subscription")) { showSubSheet = true }
-                    .buttonStyle(.bordered)
-                Button(loc("Paste Link")) { showAddSheet = true }
-                    .buttonStyle(.borderedProminent)
+            Button {
+                showAddSheet = true
+            } label: {
+                Label(loc("Add"), systemImage: "plus")
             }
+            .buttonStyle(.borderedProminent)
             .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
@@ -195,20 +187,21 @@ struct StatusCard: View {
     private var selected: ProxyConfig? { store.server(withID: store.selectedServerID) }
 
     var body: some View {
-        VStack(spacing: 16) {
+        // Kept compact on purpose: this sits above the server list, and every
+        // point it takes is a row the user has to scroll for.
+        VStack(spacing: 12) {
             ZStack {
                 Circle()
                     .fill(statusColor.opacity(0.16))
-                    .frame(width: 96, height: 96)
+                    .frame(width: 68, height: 68)
                 Image(systemName: tunnel.isConnected ? "shield.lefthalf.filled" : "shield.slash")
-                    .font(.system(size: 40, weight: .medium))
+                    .font(.system(size: 28, weight: .medium))
                     .foregroundStyle(statusColor)
             }
-            .padding(.top, 8)
 
-            VStack(spacing: 4) {
+            VStack(spacing: 2) {
                 Text(stateLabel)
-                    .font(.title3.weight(.semibold))
+                    .font(.headline)
                     .foregroundStyle(statusColor)
                 Text(subtitle)
                     .font(.subheadline)
@@ -230,7 +223,7 @@ struct StatusCard: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 20)
-        .padding(.bottom, 18)
+        .padding(.vertical, 14)
     }
 
     private func trafficLabel(icon: String, bytes: Int64) -> some View {

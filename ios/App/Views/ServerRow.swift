@@ -24,7 +24,7 @@ struct ServerRow: View {
                         Text("×\((server.alternates?.count ?? 0) + 1)")
                     }
                     if !server.xraySupported {
-                        Text("Xray only")
+                        Text("needs sing-box")
                             .foregroundStyle(.orange)
                     }
                 }

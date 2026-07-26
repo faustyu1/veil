@@ -146,7 +146,36 @@ final class TunnelController {
             let target = try await prepareManager(server: server)
             try target.connection.startVPNTunnel()
         } catch {
-            fail(error.localizedDescription)
+            fail(Self.describe(error))
+        }
+    }
+
+    /// NetworkExtension reports its problems as bare `NEVPNError`s whose
+    /// `localizedDescription` is developer-speak ("IPC failed"). Translate the
+    /// ones a user can actually act on.
+    private static func describe(_ error: Error) -> String {
+        let nsError = error as NSError
+        guard nsError.domain == NEVPNErrorDomain,
+              let code = NEVPNError.Code(rawValue: nsError.code) else {
+            return error.localizedDescription
+        }
+        switch code {
+        case .configurationInvalid:
+            return "The VPN configuration was rejected by the system."
+        case .configurationDisabled:
+            return "The VPN configuration is turned off in Settings."
+        case .connectionFailed:
+            return "The tunnel could not start. Check the log for details."
+        case .configurationStale:
+            return "The VPN configuration changed — try again."
+        case .configurationReadWriteFailed:
+            // Also what the Simulator returns: it has no VPN stack at all.
+            return "Could not talk to the VPN service. "
+                 + "NetworkExtension does not run in the Simulator — use a real device."
+        case .configurationUnknown:
+            return "No VPN configuration is installed yet."
+        @unknown default:
+            return error.localizedDescription
         }
     }
 
