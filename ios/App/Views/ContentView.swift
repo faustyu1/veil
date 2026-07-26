@@ -406,34 +406,47 @@ struct SubscriptionSection: View {
     }
 
     /// Name, note, traffic and expiry all sit above the servers: a description
-    /// under the last row reads as if it belonged to that row.
+    /// under the last row reads as if it belonged to that row. The whole block
+    /// gets the same card treatment as the rows so it reads as one group.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             titleRow
             details
         }
         .textCase(nil)
-        .padding(.bottom, 2)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 6, trailing: 0))
     }
 
     private var titleRow: some View {
         HStack(spacing: 8) {
-            Button {
-                store.toggleCollapsed(id: subscription.id)
-            } label: {
-                Image(systemName: subscription.isCollapsed ? "chevron.right" : "chevron.down")
+            // Tapping anywhere across the name collapses the group, but the
+            // menu keeps its own hit area.
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.down")
                     .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    // Rotating one glyph animates; swapping two would not.
+                    .rotationEffect(.degrees(subscription.isCollapsed ? -90 : 0))
                     .frame(width: 20)
+
+                Text(subscription.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text("\(subscription.servers.count)")
+                    .font(.caption2)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Capsule().fill(Color.secondary.opacity(0.18)))
+
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-
-            Text(subscription.name)
-            Text("\(subscription.servers.count)")
-                .font(.caption2)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(Capsule().fill(Color.secondary.opacity(0.18)))
-
-            Spacer()
+            .contentShape(Rectangle())
+            .onTapGesture { toggleCollapsed() }
 
             Menu {
                 Button(loc("Test ping")) { pinger.test(subscription.servers) }
@@ -487,6 +500,12 @@ struct SubscriptionSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private func toggleCollapsed() {
+        withAnimation(.snappy(duration: 0.28)) {
+            store.toggleCollapsed(id: subscription.id)
         }
     }
 
