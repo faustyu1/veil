@@ -111,6 +111,6 @@ enum DeviceInfo {
         if let hwid, !hwid.isEmpty {
             parts.append("hwid: \(hwid)")
         }
-        return "Veil/1.0 (" + parts.joined(separator: "; ") + ")"
+        return "Veil/\(AppVersion.current) (" + parts.joined(separator: "; ") + ")"
     }
 }

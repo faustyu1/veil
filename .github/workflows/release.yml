@@ -28,7 +28,18 @@ jobs:
 
       - name: Derive version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The VERSION file is what the app bakes into its bundle, so a tag
+          # that disagrees with it would ship a build labelled with the wrong
+          # version. Fail early instead: run Scripts/set-version.sh and commit.
+          file_version="$(cat VERSION)"
+          if [ "$version" != "$file_version" ]; then
+            echo "::error::tag v$version does not match VERSION ($file_version)."
+            echo "::error::Run Scripts/set-version.sh $version, commit, then re-tag."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Fetch core binaries
         run: |

@@ -10,6 +10,7 @@ CONFIG="${1:-release}"
 BUILD_NAME="XrayClient"      # SPM product (binary) name
 APP_NAME="Veil"             # user-facing app + bundle name
 APP_DIR="${ROOT}/${APP_NAME}.app"
+VERSION="$(cat "${ROOT}/VERSION")"   # single source of truth, see Scripts/set-version.sh
 
 echo "Building (${CONFIG})..."
 swift build -c "${CONFIG}"
@@ -46,8 +47,8 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>${APP_NAME}</string>
   <key>CFBundleDisplayName</key><string>${APP_NAME}</string>
   <key>CFBundleIdentifier</key><string>dev.local.veil</string>
-  <key>CFBundleVersion</key><string>1.0</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>${VERSION}</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>${APP_NAME}</string>
 ${ICON_LINE}

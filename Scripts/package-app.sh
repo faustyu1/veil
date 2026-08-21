@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
 
-VERSION="${1:-1.0.0}"
+VERSION="${1:-$(cat "${ROOT}/VERSION")}"
 CONFIG="release"
 BUILD_NAME="XrayClient"      # SPM product (binary) name
 APP_NAME="Veil"             # user-facing app + bundle name
