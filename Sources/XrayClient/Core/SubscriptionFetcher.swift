@@ -29,15 +29,23 @@ enum SubscriptionFetcher {
             throw LinkParseError.malformed(urlString)
         }
         var request = URLRequest(url: url)
-        let ua = hwid.map { "Veil/1.0 (hwid: \($0))" } ?? "Veil/1.0"
-        request.setValue(ua, forHTTPHeaderField: "User-Agent")
+        request.setValue(DeviceInfo.userAgent(hwid: hwid), forHTTPHeaderField: "User-Agent")
+        // Panels list the device next to the HWID; without these it shows "null".
+        request.setValue(DeviceInfo.osName, forHTTPHeaderField: "X-Device-OS")
+        request.setValue(DeviceInfo.osVersion, forHTTPHeaderField: "X-Ver-OS")
+        request.setValue(DeviceInfo.model, forHTTPHeaderField: "X-Device-Model")
         if let hwid, !hwid.isEmpty {
             request.setValue(hwid, forHTTPHeaderField: "X-HWID")
             request.setValue(hwid, forHTTPHeaderField: "X-Device-ID")
         }
         request.timeoutInterval = 20
 
-        log.info("Sub fetch URL=\(url.absoluteString, privacy: .public) hwid=\(hwid ?? "nil", privacy: .public)")
+        log.info("""
+            Sub fetch URL=\(url.absoluteString, privacy: .public) \
+            hwid=\(hwid ?? "nil", privacy: .public) \
+            device=\(DeviceInfo.model, privacy: .public) \
+            os=\(DeviceInfo.osName, privacy: .public) \(DeviceInfo.osVersion, privacy: .public)
+            """)
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let body = String(data: data, encoding: .utf8) else {

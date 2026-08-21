@@ -59,3 +59,58 @@ enum DeviceID {
     }
     #endif
 }
+
+/// Describes the device to subscription panels: model, OS name and OS version.
+/// Panels (Remnawave and friends) show these next to the HWID in their device
+/// list, and leave them empty when the client sends nothing.
+enum DeviceInfo {
+
+    /// Hardware model identifier, e.g. `iPhone16,2` or `Mac14,7`.
+    static let model: String = {
+        #if targetEnvironment(simulator)
+        if let id = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"],
+           !id.isEmpty {
+            return id
+        }
+        #endif
+        #if os(macOS)
+        let key = "hw.model"
+        #else
+        let key = "hw.machine"
+        #endif
+        var size = 0
+        guard sysctlbyname(key, nil, &size, nil, 0) == 0, size > 0 else { return "Unknown" }
+        var buffer = [UInt8](repeating: 0, count: size)
+        guard sysctlbyname(key, &buffer, &size, nil, 0) == 0 else { return "Unknown" }
+        let bytes = buffer.prefix { $0 != 0 }
+        let value = String(decoding: bytes, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "Unknown" : value
+    }()
+
+    /// Platform name as panels expect it: `iOS`, `iPadOS` or `macOS`.
+    static let osName: String = {
+        #if os(macOS)
+        return "macOS"
+        #else
+        return model.hasPrefix("iPad") ? "iPadOS" : "iOS"
+        #endif
+    }()
+
+    /// OS version, e.g. `18.5` (the patch component is dropped when it is 0).
+    static let osVersion: String = {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return v.patchVersion == 0
+            ? "\(v.majorVersion).\(v.minorVersion)"
+            : "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }()
+
+    /// User-Agent carrying the same facts, for panels that only parse the UA.
+    static func userAgent(hwid: String?) -> String {
+        var parts = ["\(osName) \(osVersion)", model]
+        if let hwid, !hwid.isEmpty {
+            parts.append("hwid: \(hwid)")
+        }
+        return "Veil/1.0 (" + parts.joined(separator: "; ") + ")"
+    }
+}
