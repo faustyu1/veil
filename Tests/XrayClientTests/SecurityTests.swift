@@ -113,3 +113,43 @@ final class HelperValidationTests: XCTestCase {
         XCTAssertNil(TunManager.splitAddress(":10808"))
     }
 }
+
+/// The HWID is the one identifier a panel sees, so where it comes from on a
+/// machine that has never run Veil matters as much as where it is stored.
+final class DeviceIdentifierTests: XCTestCase {
+
+    private var wasUpgrade = false
+
+    override func setUp() {
+        super.setUp()
+        wasUpgrade = DeviceID.isUpgrade
+    }
+
+    override func tearDown() {
+        DeviceID.isUpgrade = wasUpgrade
+        super.tearDown()
+    }
+
+    func testFreshInstallDoesNotAdoptTheMachineIdentifier() {
+        DeviceID.isUpgrade = false
+        XCTAssertNil(DeviceID.legacyIdentifierForTesting(),
+                     "a machine with no earlier install has no identity to carry forward")
+    }
+
+    func testUpgradeCarriesTheOldIdentifierForward() throws {
+        DeviceID.isUpgrade = true
+        let carried = DeviceID.legacyIdentifierForTesting()
+        #if os(macOS)
+        // Every Mac reports an IOPlatformUUID; an upgrade has to reuse it
+        // rather than register itself with the panel as a second device.
+        let value = try XCTUnwrap(carried)
+        XCTAssertFalse(value.isEmpty)
+        #else
+        _ = carried
+        #endif
+    }
+
+    // `DeviceID.regenerate()` is deliberately not exercised here: it writes the
+    // real Keychain item the installed app reads, and a test that rotates a
+    // user's HWID behind their back is worse than an untested one line.
+}

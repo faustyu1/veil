@@ -25,10 +25,17 @@ final class ServerStore {
                                 create: true)) ?? fm.temporaryDirectory
         let dir = base.appendingPathComponent("XrayClient", isDirectory: true)
         #endif
+        // Whether an earlier build already ran here has to be answered before
+        // anything is written, because the first save would otherwise make
+        // every fresh install look like an upgrade. `DeviceID` uses it to
+        // decide if there is an identifier worth carrying forward.
+        let store = dir.appendingPathComponent("store.json")
+        DeviceID.isUpgrade = FileManager.default.fileExists(atPath: store.path)
+
         // Application Support is world-readable by default and this file holds
         // server addresses, UUIDs and passwords.
         SecureFile.ensureDirectory(dir)
-        self.fileURL = dir.appendingPathComponent("store.json")
+        self.fileURL = store
         load()
         selectedServerID = settings.lastSelectedServerID
     }

@@ -16,6 +16,14 @@ enum DeviceID {
     /// Keychain/`UserDefaults` account for the default identifier.
     static let defaultAccount = "device.hwid"
 
+    /// Set once at startup, before anything writes to disk: true when this
+    /// machine already ran a build that talked to a panel.
+    ///
+    /// Without it every fresh install would adopt the legacy identifier — the
+    /// `IOPlatformUUID` this type exists to stop using — because the legacy
+    /// reader on macOS always succeeds.
+    nonisolated(unsafe) static var isUpgrade = false
+
     /// The identifier used when a subscription has no HWID of its own.
     static var hwid: String { hwid(for: nil) }
 
@@ -95,12 +103,18 @@ enum DeviceID {
     }
 
     /// The identifier an older build would have used, so upgrading does not
-    /// look like a new device to the panel.
+    /// look like a new device to the panel. Only consulted when `isUpgrade`
+    /// says there was an older build.
+    static func legacyIdentifierForTesting() -> String? { legacyIdentifier() }
+
     private static func legacyIdentifier() -> String? {
         #if os(macOS)
-        return platformUUID()
+        // A machine with no earlier install has no identity to carry forward,
+        // and `IOPlatformUUID` is exactly what a fresh install must not adopt.
+        return isUpgrade ? platformUUID() : nil
         #else
-        // Older iOS builds kept a minted UUID under this app-group key.
+        // Older iOS builds kept a minted UUID under this app-group key, which
+        // exists only if one of them ran: it is its own proof of an upgrade.
         let legacy = defaults?.string(forKey: "hwid")
         return (legacy?.isEmpty == false) ? legacy : nil
         #endif
