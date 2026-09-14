@@ -120,7 +120,7 @@ enum PrivilegedHelper {
     /// Opens a connection, runs one command, and waits for its single reply.
     private static func perform(
         timeout: TimeInterval,
-        _ body: (VeilHelperProtocol, @escaping (String?) -> Void) -> Void
+        _ body: (VeilHelperProtocol, (String?) -> Void) -> Void
     ) throws {
         guard isInstalled else { throw HelperError.notInstalled }
 

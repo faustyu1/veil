@@ -68,6 +68,7 @@ final class GeoAssetManager {
         let geoip = source.geoipURL(custom: customGeoip)
         let geosite = source == .custom ? customGeosite
                                         : source.geositeURL(custom: customGeosite)
+        removeStagedLeftovers()
 
         do {
             let stagedGeoip = try await stage(urlString: geoip)
@@ -87,6 +88,18 @@ final class GeoAssetManager {
             refreshState()
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    /// Clears anything an interrupted update left in the geo directory.
+    private func removeStagedLeftovers() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: directory,
+                                                      includingPropertiesForKeys: nil) else {
+            return
+        }
+        for file in files where file.lastPathComponent.hasPrefix(".staging-") {
+            try? fm.removeItem(at: file)
         }
     }
 
