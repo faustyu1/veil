@@ -73,8 +73,8 @@ private final class ListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecke
     }
 }
 
-let delegate = ListenerDelegate(requirement: loadClientRequirement())
-let listener = NSXPCListener(machServiceName: VeilHelperInfo.machServiceName)
+private let delegate = ListenerDelegate(requirement: loadClientRequirement())
+private let listener = NSXPCListener(machServiceName: VeilHelperInfo.machServiceName)
 listener.delegate = delegate
 listener.resume()
 bootLog.info("helper \(VeilHelperInfo.protocolVersion, privacy: .public) listening")

@@ -73,31 +73,31 @@ enum PrivilegedHelper {
         try perform(timeout: 30) { proxy, finish in
             proxy.startTunnel(socksHost: socksHost, socksPort: socksPort,
                               serverIPs: serverIPs, dnsServers: dnsServers,
-                              reply: finish)
+                              reply: finish.finish)
         }
     }
 
     static func stopTunnel() throws {
         try perform(timeout: 20) { proxy, finish in
-            proxy.stopTunnel(reply: finish)
+            proxy.stopTunnel(reply: finish.finish)
         }
     }
 
     static func pinServerIPs(_ ips: [String]) throws {
         try perform(timeout: 15) { proxy, finish in
-            proxy.pinServerIPs(ips, reply: finish)
+            proxy.pinServerIPs(ips, reply: finish.finish)
         }
     }
 
     static func addProbeRoutes(_ ips: [String]) throws {
         try perform(timeout: 15) { proxy, finish in
-            proxy.addProbeRoutes(ips, reply: finish)
+            proxy.addProbeRoutes(ips, reply: finish.finish)
         }
     }
 
     static func removeProbeRoutes() throws {
         try perform(timeout: 15) { proxy, finish in
-            proxy.removeProbeRoutes(reply: finish)
+            proxy.removeProbeRoutes(reply: finish.finish)
         }
     }
 
@@ -117,10 +117,20 @@ enum PrivilegedHelper {
 
     // MARK: - Plumbing
 
+    /// Carries the reply block into `perform`'s body.
+    ///
+    /// A bare closure parameter would be non-escaping, and the protocol's reply
+    /// blocks are `@escaping`; `@escaping` cannot be spelled on a nested
+    /// function type, so the closure travels as a stored property instead.
+    struct Completion {
+        let finish: (String?) -> Void
+        func callAsFunction(_ message: String?) { finish(message) }
+    }
+
     /// Opens a connection, runs one command, and waits for its single reply.
     private static func perform(
         timeout: TimeInterval,
-        _ body: (VeilHelperProtocol, (String?) -> Void) -> Void
+        _ body: (VeilHelperProtocol, Completion) -> Void
     ) throws {
         guard isInstalled else { throw HelperError.notInstalled }
 
@@ -144,10 +154,10 @@ enum PrivilegedHelper {
             throw HelperError.unreachable("unexpected proxy type")
         }
 
-        body(helper) { message in
+        body(helper, Completion { message in
             if let message, !message.isEmpty { failure.value = message }
             semaphore.signal()
-        }
+        })
 
         guard semaphore.wait(timeout: .now() + timeout) == .success else {
             throw HelperError.unreachable("timed out after \(Int(timeout))s")

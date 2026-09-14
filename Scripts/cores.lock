@@ -13,3 +13,6 @@
 #
 # Until a core is listed here the fetch scripts still work, but they print a
 # warning: an unpinned core is exactly the supply-chain hole this file closes.
+sing-box arm64 v1.14.0 a150c94012ff768b7261939cd236b9c8554127f45137230295d23a5660225cc9
+tun2socks arm64 v2.7.0 7c5ebfe2ffb60ecf6e958cc5bbf3e06e74b8b33575ffbb4ba4f6f785a647f1ad
+xray arm64 v26.3.27 2e93a67e8aa1936ecefb307e120830fcbd4c643ab9b1c46a2d0838d5f8409eaf
