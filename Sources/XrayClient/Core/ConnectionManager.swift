@@ -36,6 +36,8 @@ final class ConnectionManager {
     private(set) var logs: String = ""
     private(set) var connectedSince: Date?
     private(set) var uptimeText: String = ""
+    private(set) var strictKillSwitchActive = false
+    private(set) var ipv6ProtectionActive = false
 
     var mode: TunnelMode = .systemProxy
     var ports = InboundPorts()
@@ -43,6 +45,8 @@ final class ConnectionManager {
     var routingRules: [RoutingRule] = []
     /// Xray core log verbosity.
     var logLevel: LogLevel = .warning
+    var killSwitch: KillSwitchMode = .strict
+    var strictIPv6Protection: Bool = true
 
     /// Auto-reconnect when the link silently dies (NAT/firewall idle timeout).
     var autoReconnect: Bool = true
@@ -119,6 +123,9 @@ final class ConnectionManager {
         activeServerName = server.name
         let coreName = server.engine == .singbox ? "sing-box" : "xray"
         appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title), \(coreName))\n")
+        if CoreBinary.isUnsafeDevelopmentOverride(binary, name: coreName) {
+            appendLog("[security] UNSAFE DEVELOPMENT CORE OVERRIDE: \(binary.path)\n")
+        }
 
         do {
             let data: Data
@@ -209,10 +216,15 @@ final class ConnectionManager {
             // tun2socks keeps running across switches; the helper's fast path just
             // re-pins the new server IP(s) (sub-second, no utun re-create).
             // For a balancer group we pin every node so the tunnel never loops.
+            let strictKillSwitch = killSwitch == .strict
+            let protectIPv6 = strictKillSwitch || strictIPv6Protection
             Task.detached(priority: .userInitiated) {
                 let ips = Set(serverHosts.flatMap { TunManager.resolveIPs(host: $0) })
                 do {
-                    try TunManager.up(socksAddr: socksAddr, serverIPs: Array(ips))
+                    try TunManager.up(socksAddr: socksAddr,
+                                      serverIPs: Array(ips),
+                                      strictKillSwitch: strictKillSwitch,
+                                      protectIPv6: protectIPv6)
                     await MainActor.run {
                         self.finishConnect(serverID: serverID, mode: mode)
                         self.appendLog("[info] TUN \(keepTransport ? "re-pinned" : "up") (\(ips.joined(separator: ", ")))")
@@ -231,6 +243,8 @@ final class ConnectionManager {
         let wasReconnecting = isReconnecting
         activeServerID = serverID
         activeMode = mode
+        strictKillSwitchActive = mode == .tun && killSwitch == .strict
+        ipv6ProtectionActive = mode == .tun && (killSwitch == .strict || strictIPv6Protection)
         state = .connected
         isReconnecting = false
         if connectedSince == nil { startUptime() }
@@ -265,6 +279,8 @@ final class ConnectionManager {
         case .systemProxy: SystemProxy.disable()
         case .tun:         TunManager.down()
         }
+        strictKillSwitchActive = false
+        ipv6ProtectionActive = false
     }
 
     private func fail(_ message: String) {
@@ -477,11 +493,16 @@ final class ConnectionManager {
                         : "[error] could not re-apply system proxy after \(reason)\n")
         case .tun:
             let socksAddr = "\(listen):\(socks)"
+            let strictKillSwitch = killSwitch == .strict
+            let protectIPv6 = strictKillSwitch || strictIPv6Protection
             Task.detached(priority: .userInitiated) { [weak self] in
                 guard let self else { return }
                 let ips = Set(server.allAddresses.flatMap { TunManager.resolveIPs(host: $0) })
                 do {
-                    try TunManager.up(socksAddr: socksAddr, serverIPs: Array(ips))
+                    try TunManager.up(socksAddr: socksAddr,
+                                      serverIPs: Array(ips),
+                                      strictKillSwitch: strictKillSwitch,
+                                      protectIPv6: protectIPv6)
                     await MainActor.run {
                         self.appendLog("[info] TUN re-pinned after \(reason)\n")
                     }

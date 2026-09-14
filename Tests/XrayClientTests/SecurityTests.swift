@@ -1,6 +1,9 @@
 import XCTest
 @testable import XrayClient
 import VeilHelperKit
+#if os(macOS)
+import CryptoKit
+#endif
 
 /// Covers the pieces that stand between a user's credentials and a log file,
 /// a diagnostics paste, or a root process.
@@ -94,8 +97,53 @@ final class HelperValidationTests: XCTestCase {
 
     func testOnlyLoopbackMayHostTheSOCKSProxy() {
         XCTAssertTrue(HelperValidation.isLoopback("127.0.0.1"))
+        XCTAssertTrue(HelperValidation.isLoopback("::1"))
         XCTAssertFalse(HelperValidation.isLoopback("10.0.0.1"))
         XCTAssertFalse(HelperValidation.isLoopback("evil.example.com"))
+    }
+
+    func testIPv6LiteralsAreValidatedWithoutScopeInjection() {
+        XCTAssertTrue(HelperValidation.isIPv6("2001:db8::1"))
+        XCTAssertTrue(HelperValidation.isIPv6("::1"))
+        XCTAssertFalse(HelperValidation.isIPv6("2001:db8::1%en0"))
+        XCTAssertFalse(HelperValidation.isIPv6("example.com"))
+        XCTAssertFalse(HelperValidation.isIPv6("::1; touch /tmp/pwned"))
+    }
+
+    func testAddressSanitizationAcceptsBothFamiliesAndRejectsCommands() {
+        let values = ["192.0.2.1", "2001:db8::2", "2001:db8::2", "::1;id"]
+        XCTAssertEqual(HelperValidation.sanitizeAddresses(values),
+                       ["192.0.2.1", "2001:db8::2"])
+    }
+
+    func testClientRequirementMustBeNarrow() {
+        XCTAssertTrue(HelperValidation.isAllowedClientRequirement(
+            #"anchor apple generic and identifier "dev.local.veil" and certificate leaf[subject.OU] = "TEAM123""#))
+        XCTAssertTrue(HelperValidation.isAllowedClientRequirement(
+            #"identifier "dev.local.veil" and cdhash H"0123456789abcdef0123456789abcdef01234567""#))
+        XCTAssertFalse(HelperValidation.isAllowedClientRequirement("anchor apple"))
+        XCTAssertFalse(HelperValidation.isAllowedClientRequirement(
+            #"identifier "com.attacker.app" and cdhash H"0123""#))
+        XCTAssertFalse(HelperValidation.isAllowedClientRequirement(
+            "identifier \"dev.local.veil\"\nor anchor apple"))
+        XCTAssertFalse(HelperValidation.isAllowedClientRequirement(
+            #"anchor apple generic and identifier "dev.local.veil" and certificate leaf[subject.OU] = "TEAM123" or anchor apple"#))
+    }
+
+    func testKillSwitchRulesAllowOnlyTypedExceptions() throws {
+        let rules = try XCTUnwrap(KillSwitchRules.render(
+            physicalInterface: "en0", tunnelInterface: "utun123",
+            endpointIPs: ["192.0.2.10", "2001:db8::10"]))
+        XCTAssertTrue(rules.contains("pass out quick on utun123 all"))
+        XCTAssertTrue(rules.contains("pass out quick on en0 to 192.0.2.10"))
+        XCTAssertTrue(rules.contains("pass out quick on en0 to 2001:db8::10"))
+        XCTAssertTrue(rules.hasSuffix("block drop out quick all\n"))
+        XCTAssertNil(KillSwitchRules.render(
+            physicalInterface: "en0\npass out all", tunnelInterface: "utun123",
+            endpointIPs: ["192.0.2.10"]))
+        XCTAssertNil(KillSwitchRules.render(
+            physicalInterface: "en0", tunnelInterface: "utun123",
+            endpointIPs: ["192.0.2.10; pass out all"]))
     }
 
     func testPortRange() {
@@ -180,3 +228,79 @@ final class Tun2socksArgumentTests: XCTestCase {
                               "--interface", "en0"])
     }
 }
+
+final class TunnelRoutePolicyTests: XCTestCase {
+    func testStrictIPv4HasPersistentFallbackAndMoreSpecificActiveRoutes() {
+        XCTAssertEqual(TunnelRoutePolicy.strictFallbackIPv4,
+                       ["0.0.0.0/1", "128.0.0.0/1"])
+        XCTAssertEqual(TunnelRoutePolicy.strictTunnelIPv4.count, 4)
+        XCTAssertTrue(TunnelRoutePolicy.strictTunnelIPv4.allSatisfy { $0.hasSuffix("/2") })
+    }
+
+    func testIPv6ProtectionCoversBothAddressHalves() {
+        XCTAssertEqual(TunnelRoutePolicy.protectedIPv6, ["::/1", "8000::/1"])
+    }
+
+    func testLegacySettingsMigrateToSafeTunnelDefaults() throws {
+        let settings = try JSONDecoder().decode(AppSettings.self,
+                                                from: Data(#"{"mode":"tun"}"#.utf8))
+        XCTAssertEqual(settings.killSwitch, .strict)
+        XCTAssertTrue(settings.strictIPv6Protection)
+    }
+}
+
+#if os(macOS)
+final class CoreRuntimeSecurityTests: XCTestCase {
+    private func temporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("veil-security-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func testCoreManifestRejectsMalformedAndWrongArchitecture() throws {
+        XCTAssertNil(CoreVerifier.Manifest(text: "not-a-hash arm64"))
+        let hash = String(repeating: "a", count: 64)
+        let wrong = CoreVerifier.currentArchitecture == "arm64" ? "x86_64" : "arm64"
+        let manifest = try XCTUnwrap(CoreVerifier.Manifest(text: "\(hash) \(wrong)"))
+        XCTAssertFalse(CoreVerifier.verify(URL(fileURLWithPath: "/bin/echo"), manifest: manifest))
+    }
+
+    func testCoreHashAcceptsExactBytesAndRejectsChanges() throws {
+        let dir = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let binary = dir.appendingPathComponent("core")
+        try Data("trusted".utf8).write(to: binary)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
+        let hash = SHA256.hash(data: Data("trusted".utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let manifest = try XCTUnwrap(CoreVerifier.Manifest(
+            text: "\(hash) \(CoreVerifier.currentArchitecture)"))
+        XCTAssertTrue(CoreVerifier.verify(binary, manifest: manifest))
+        try Data("changed".utf8).write(to: binary)
+        XCTAssertFalse(CoreVerifier.verify(binary, manifest: manifest))
+    }
+
+    func testBundledCoreWithoutManifestIsRejected() throws {
+        let dir = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let binary = dir.appendingPathComponent("xray")
+        try Data("unknown".utf8).write(to: binary)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
+        XCTAssertFalse(CoreVerifier.verifyBundled(binary, name: "xray"))
+    }
+
+    func testCoreConfigsArePrivateAndStaleFilesAreRemoved() throws {
+        let dir = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let stale = dir.appendingPathComponent("core-config-stale")
+        try Data("secret".utf8).write(to: stale)
+        let created = try SecureCoreConfig.create(Data("credential".utf8), in: dir)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stale.path))
+        let attrs = try FileManager.default.attributesOfItem(atPath: created.path)
+        XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        SecureCoreConfig.remove(created, from: dir)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: created.path))
+    }
+}
+#endif

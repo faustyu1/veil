@@ -11,6 +11,13 @@ import VeilHelperKit
 /// threading async through a callback API that must never be half-applied.
 enum PrivilegedHelper {
 
+    struct TunnelStatus {
+        let isUp: Bool
+        let device: String?
+        let strictKillSwitch: Bool
+        let protectsIPv6: Bool
+    }
+
     enum HelperError: LocalizedError {
         case notInstalled
         case versionMismatch(installed: Int, expected: Int)
@@ -69,10 +76,13 @@ enum PrivilegedHelper {
     // MARK: - Commands
 
     static func startTunnel(socksHost: String, socksPort: Int,
-                            serverIPs: [String], dnsServers: [String]) throws {
+                            serverIPs: [String], dnsServers: [String],
+                            strictKillSwitch: Bool, protectIPv6: Bool) throws {
         try perform(timeout: 30) { proxy, finish in
             proxy.startTunnel(socksHost: socksHost, socksPort: socksPort,
                               serverIPs: serverIPs, dnsServers: dnsServers,
+                              strictKillSwitch: strictKillSwitch,
+                              protectIPv6: protectIPv6,
                               reply: finish.finish)
         }
     }
@@ -104,15 +114,22 @@ enum PrivilegedHelper {
     /// Whether a tunnel is currently up according to the helper itself, rather
     /// than according to a file someone could have left behind.
     static var tunnelIsUp: Bool {
-        guard isInstalled else { return false }
-        let box = Box<Bool>()
+        tunnelStatus?.isUp ?? false
+    }
+
+    /// The helper's authoritative protection state for UI/diagnostics.
+    static var tunnelStatus: TunnelStatus? {
+        guard isInstalled else { return nil }
+        let box = Box<TunnelStatus>()
         try? perform(timeout: 5) { proxy, finish in
-            proxy.tunnelStatus { isUp, _ in
-                box.value = isUp
+            proxy.tunnelStatus { isUp, device, strict, ipv6 in
+                box.value = TunnelStatus(isUp: isUp, device: device,
+                                         strictKillSwitch: strict,
+                                         protectsIPv6: ipv6)
                 finish(nil)
             }
         }
-        return box.value ?? false
+        return box.value
     }
 
     // MARK: - Plumbing

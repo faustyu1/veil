@@ -30,6 +30,8 @@ enum Diagnostics {
 
         lines.append("## Settings")
         lines.append("mode: \(store.settings.mode.rawValue)")
+        lines.append("kill switch: \(store.settings.killSwitch.rawValue)")
+        lines.append("strict IPv6 protection: \(store.settings.strictIPv6Protection)")
         lines.append("socks port: \(store.settings.socksPort)")
         lines.append("http port: \(store.settings.httpPort)")
         lines.append("routing preset: \(store.settings.routingPreset.rawValue)")
@@ -47,7 +49,14 @@ enum Diagnostics {
         lines.append("installed: \(PrivilegedHelper.isInstalled)")
         lines.append("protocol: \(PrivilegedHelper.installedVersion.map(String.init) ?? "unreachable") "
                      + "(app expects \(VeilHelperInfo.protocolVersion))")
-        lines.append("tunnel up: \(PrivilegedHelper.tunnelIsUp)")
+        if let status = PrivilegedHelper.tunnelStatus {
+            lines.append("tunnel up: \(status.isUp)")
+            lines.append("tunnel device: \(status.device ?? "none")")
+            lines.append("strict kill switch enforced: \(status.strictKillSwitch)")
+            lines.append("IPv6 protection enforced: \(status.protectsIPv6)")
+        } else {
+            lines.append("tunnel status: unreachable")
+        }
         lines.append("")
         #endif
 

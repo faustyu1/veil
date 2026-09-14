@@ -45,6 +45,7 @@ if [ -z "${BIN}" ]; then
 fi
 cp "${BIN}" "${DEST_DIR}/tun2socks"
 chmod +x "${DEST_DIR}/tun2socks"
+printf '%s %s\n' "$(sha256_of "${DEST_DIR}/tun2socks")" "${ARCH}" > "${DEST_DIR}/tun2socks.sha256"
 xattr -dr com.apple.quarantine "${DEST_DIR}/tun2socks" 2>/dev/null || true
 
 echo "Installed tun2socks -> ${DEST_DIR}/tun2socks"

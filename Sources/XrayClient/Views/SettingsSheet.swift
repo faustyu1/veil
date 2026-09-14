@@ -41,6 +41,33 @@ struct SettingsSheet: View {
                     Text(store.settings.mode.subtitle)
                         .font(.caption).foregroundStyle(.secondary)
 
+                    Picker("Kill switch", selection: $store.settings.killSwitch) {
+                        ForEach(KillSwitchMode.allCases) { mode in Text(mode.title).tag(mode) }
+                    }
+                    .disabled(connection.isConnected)
+                    .onChange(of: store.settings.killSwitch) { _, value in
+                        connection.killSwitch = value; store.save()
+                    }
+                    if store.settings.mode == .systemProxy {
+                        Text("Kill-switch enforcement requires TUN mode; System Proxy is not a full tunnel.")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    Toggle("Strict IPv6 protection", isOn: $store.settings.strictIPv6Protection)
+                        .disabled(connection.isConnected || store.settings.killSwitch == .strict)
+                        .onChange(of: store.settings.strictIPv6Protection) { _, value in
+                            connection.strictIPv6Protection = value; store.save()
+                        }
+                    Text("Blocks IPv6 outside the tunnel until native macOS IPv6 tunneling is available.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if connection.mode == .tun && connection.isConnected {
+                        LabeledContent("Protection state") {
+                            Text(connection.strictKillSwitchActive
+                                 ? (connection.ipv6ProtectionActive ? "IPv4 + IPv6 fail-closed" : "IPv4 fail-closed")
+                                 : (connection.ipv6ProtectionActive ? "IPv6 blocked" : "Not fail-closed"))
+                                .foregroundStyle(connection.strictKillSwitchActive ? .green : .orange)
+                        }
+                    }
+
                     HStack {
                         Text(loc("SOCKS port"))
                         Spacer()

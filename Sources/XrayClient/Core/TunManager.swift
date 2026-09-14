@@ -51,8 +51,8 @@ enum TunManager {
             throw TunError.missingResource("install-daemon.sh")
         }
         do {
-            try runAsAdmin(["/bin/bash", installer.path,
-                            payload.path, Bundle.main.bundleURL.path])
+            try runVerifiedScriptAsAdmin(installer, payload: payload,
+                                         appBundle: Bundle.main.bundleURL)
         } catch {
             throw TunError.installFailed(error.localizedDescription)
         }
@@ -64,7 +64,8 @@ enum TunManager {
         guard let payload = PrivilegedHelper.bundledPayloadDirectory else { return }
         let uninstaller = payload.appendingPathComponent("uninstall-daemon.sh")
         guard FileManager.default.fileExists(atPath: uninstaller.path) else { return }
-        try? runAsAdmin(["/bin/bash", uninstaller.path])
+        try? runVerifiedScriptAsAdmin(uninstaller, payload: payload,
+                                      appBundle: Bundle.main.bundleURL)
     }
 
     // MARK: - Up / Down
@@ -72,7 +73,9 @@ enum TunManager {
     /// Brings TUN up, installing the helper first if needed.
     static func up(socksAddr: String,
                    serverIPs: [String],
-                   dnsServers: [String] = defaultTunnelDNS) throws {
+                   dnsServers: [String] = defaultTunnelDNS,
+                   strictKillSwitch: Bool = true,
+                   protectIPv6: Bool = true) throws {
         if !isHelperInstalled {
             try installHelper()
         }
@@ -81,7 +84,9 @@ enum TunManager {
         }
         try PrivilegedHelper.startTunnel(socksHost: host, socksPort: port,
                                          serverIPs: serverIPs,
-                                         dnsServers: dnsServers)
+                                         dnsServers: dnsServers,
+                                         strictKillSwitch: strictKillSwitch,
+                                         protectIPv6: protectIPv6)
     }
 
     /// Tears TUN down. Best-effort.
@@ -112,11 +117,11 @@ enum TunManager {
 
     // MARK: - Server IP resolution
 
-    /// Resolves a host to IPv4 addresses. IP literals pass through unchanged.
+    /// Resolves a host to IPv4 and IPv6 addresses. IP literals pass through unchanged.
     static func resolveIPs(host: String) -> [String] {
-        if HelperValidation.isIPv4(host) { return [host] }
+        if HelperValidation.isIPv4(host) || HelperValidation.isIPv6(host) { return [host] }
         var results: [String] = []
-        var hints = addrinfo(ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_STREAM,
+        var hints = addrinfo(ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
                              ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil,
                              ai_addr: nil, ai_next: nil)
         var info: UnsafeMutablePointer<addrinfo>?
@@ -124,11 +129,14 @@ enum TunManager {
         defer { freeaddrinfo(info) }
         var ptr = info
         while let node = ptr {
-            if let sa = node.pointee.ai_addr {
-                var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { sin in
-                    var addr = sin.pointee.sin_addr
-                    inet_ntop(AF_INET, &addr, &buf, socklen_t(INET_ADDRSTRLEN))
+            if let sa = node.pointee.ai_addr,
+               sa.pointee.sa_family == AF_INET || sa.pointee.sa_family == AF_INET6 {
+                var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                guard getnameinfo(sa, node.pointee.ai_addrlen,
+                                  &buf, socklen_t(buf.count), nil, 0,
+                                  NI_NUMERICHOST) == 0 else {
+                    ptr = node.pointee.ai_next
+                    continue
                 }
                 let ip = String(cString: buf)
                 if !ip.isEmpty, !results.contains(ip) { results.append(ip) }
@@ -152,7 +160,36 @@ enum TunManager {
     /// Runs the installer as root via AppleScript's admin prompt. This is the
     /// only place the app asks for a password, and the only thing it ever runs
     /// this way is one of its own two bundled installer scripts.
-    private static func runAsAdmin(_ argv: [String]) throws {
+    private static func runVerifiedScriptAsAdmin(_ script: URL, payload: URL,
+                                                 appBundle: URL) throws {
+        let allowed = ["install-daemon.sh", "uninstall-daemon.sh"]
+        guard allowed.contains(script.lastPathComponent),
+              script.deletingLastPathComponent().standardizedFileURL == payload.standardizedFileURL else {
+            throw TunError.scriptFailed("Refusing an unexpected privileged script")
+        }
+
+        // This bootstrap is compiled into the signed app. Root verifies the app,
+        // copies the requested signed-manifest script to a root-only file, checks
+        // the copy, and only then executes it. The mutable bundle path is never
+        // directly interpreted as root shell code.
+        let bootstrap = #"""
+set -euo pipefail
+app="$1"; payload="$2"; name="$3"
+case "$name" in install-daemon.sh|uninstall-daemon.sh) ;; *) exit 64 ;; esac
+/usr/bin/codesign --verify --deep --strict "$app"
+manifest="$payload/payload.sha256"
+expected=$(/usr/bin/awk -v n="$name" '$2 == n || $2 == "*" n { print $1 }' "$manifest")
+[ "${#expected}" -eq 64 ]
+tmp=$(/usr/bin/mktemp "/var/tmp/veil-bootstrap.XXXXXX")
+trap '/bin/rm -f "$tmp"' EXIT
+/usr/bin/install -m 0700 -o root -g wheel "$payload/$name" "$tmp"
+actual=$(/usr/bin/shasum -a 256 "$tmp" | /usr/bin/awk '{print $1}')
+[ "$actual" = "$expected" ]
+/bin/bash "$tmp" "$payload" "$app"
+"""#
+
+        let argv = ["/bin/bash", "-c", bootstrap, "veil-bootstrap",
+                    appBundle.path, payload.path, script.lastPathComponent]
         let command = argv
             .map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             .joined(separator: " ")

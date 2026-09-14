@@ -20,6 +20,14 @@ enum TunnelMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum KillSwitchMode: String, Codable, CaseIterable, Identifiable {
+    case disabled
+    case strict
+
+    var id: String { rawValue }
+    var title: String { self == .strict ? "Strict (recommended)" : "Disabled" }
+}
+
 enum AppAppearance: String, Codable, CaseIterable, Identifiable {
     case system, light, dark
     var id: String { rawValue }
@@ -60,6 +68,8 @@ struct AppSettings: Codable, Equatable {
     var httpPort: Int = 10809
     var lastSelectedServerID: UUID?
     var logLevel: LogLevel = .warning
+    var killSwitch: KillSwitchMode = .strict
+    var strictIPv6Protection: Bool = true
 
     // Routing
     var routingPreset: RoutingPreset = .bypassLAN
@@ -108,6 +118,8 @@ struct AppSettings: Codable, Equatable {
         httpPort = get(.httpPort, 10809)
         lastSelectedServerID = try? c.decode(UUID.self, forKey: .lastSelectedServerID)
         logLevel = get(.logLevel, .warning)
+        killSwitch = get(.killSwitch, .strict)
+        strictIPv6Protection = get(.strictIPv6Protection, true)
         routingPreset = get(.routingPreset, .bypassLAN)
         customRules = get(.customRules, [])
         blockAds = get(.blockAds, false)
@@ -148,4 +160,3 @@ struct AppSettings: Codable, Equatable {
         return routingPreset.builtInRules(blockAds: blockAds)
     }
 }
-

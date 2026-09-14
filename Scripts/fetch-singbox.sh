@@ -48,6 +48,7 @@ if [ -z "${BIN}" ]; then
 fi
 cp "${BIN}" "${DEST_DIR}/sing-box"
 chmod +x "${DEST_DIR}/sing-box"
+printf '%s %s\n' "$(sha256_of "${DEST_DIR}/sing-box")" "${ARCH}" > "${DEST_DIR}/sing-box.sha256"
 xattr -dr com.apple.quarantine "${DEST_DIR}/sing-box" 2>/dev/null || true
 
 echo "Installed sing-box -> ${DEST_DIR}/sing-box"

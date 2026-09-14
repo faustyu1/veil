@@ -30,3 +30,6 @@ jobs:
 
       - name: Test
         run: swift test
+
+      - name: Security script invariants
+        run: bash Tests/SecurityScripts/install-hardening.sh

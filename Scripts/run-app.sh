@@ -67,13 +67,26 @@ ${ICON_LINE}
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSCameraUsageDescription</key><string>Veil uses the camera to scan server QR codes.</string>
+  <key>VeilDevelopmentBuild</key><true/>
   <key>LSUIElement</key><false/>
 </dict>
 </plist>
 PLIST
 
-# Ad-hoc sign so the app and the bundled xray binary run locally.
-codesign --force --deep --sign - "${APP_DIR}" 2>/dev/null || true
+# Sign nested code first, then hash those final bytes, then seal the app.
+codesign --force --sign - "${HELPER_DIR}/VeilHelper"
+codesign --force --sign - "${HELPER_DIR}/tun2socks"
+ARCH="$(uname -m)"
+while IFS= read -r core; do
+  codesign --force --sign - "${core}"
+  /usr/bin/shasum -a 256 "${core}" | /usr/bin/awk -v a="${ARCH}" '{print $1, a}' > "${core}.sha256"
+done < <(find "${APP_DIR}/Contents/Resources" -type f \( -name xray -o -name sing-box \))
+(
+  cd "${HELPER_DIR}"
+  /usr/bin/shasum -a 256 VeilHelper tun2socks install-daemon.sh uninstall-daemon.sh > payload.sha256
+)
+codesign --force --sign - "${APP_DIR}"
+codesign --verify --deep --strict "${APP_DIR}"
 
 echo "Launching ${APP_NAME}.app..."
 open "${APP_DIR}"

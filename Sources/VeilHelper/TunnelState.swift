@@ -11,11 +11,51 @@ struct TunnelState: Codable {
     var device: String
     var originalGateway: String
     var originalInterface: String
+    var originalIPv6Gateway: String?
+    var originalIPv6Interface: String?
     var pinnedIPs: [String] = []
     var probeIPs: [String] = []
     /// Resolvers each network service had before the tunnel touched it.
     var savedDNS: [String: [String]] = [:]
     var tun2socksPID: Int32?
+    var strictKillSwitch: Bool = false
+    var protectsIPv6: Bool = false
+    var pfEnableToken: String?
+
+    enum CodingKeys: String, CodingKey {
+        case device, originalGateway, originalInterface
+        case originalIPv6Gateway, originalIPv6Interface
+        case pinnedIPs, probeIPs, savedDNS, tun2socksPID
+        case strictKillSwitch, protectsIPv6, pfEnableToken
+    }
+
+    init(device: String, originalGateway: String, originalInterface: String,
+         originalIPv6Gateway: String? = nil, originalIPv6Interface: String? = nil,
+         strictKillSwitch: Bool = false, protectsIPv6: Bool = false) {
+        self.device = device
+        self.originalGateway = originalGateway
+        self.originalInterface = originalInterface
+        self.originalIPv6Gateway = originalIPv6Gateway
+        self.originalIPv6Interface = originalIPv6Interface
+        self.strictKillSwitch = strictKillSwitch
+        self.protectsIPv6 = protectsIPv6
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        device = try c.decode(String.self, forKey: .device)
+        originalGateway = try c.decode(String.self, forKey: .originalGateway)
+        originalInterface = try c.decode(String.self, forKey: .originalInterface)
+        originalIPv6Gateway = try c.decodeIfPresent(String.self, forKey: .originalIPv6Gateway)
+        originalIPv6Interface = try c.decodeIfPresent(String.self, forKey: .originalIPv6Interface)
+        pinnedIPs = try c.decodeIfPresent([String].self, forKey: .pinnedIPs) ?? []
+        probeIPs = try c.decodeIfPresent([String].self, forKey: .probeIPs) ?? []
+        savedDNS = try c.decodeIfPresent([String: [String]].self, forKey: .savedDNS) ?? [:]
+        tun2socksPID = try c.decodeIfPresent(Int32.self, forKey: .tun2socksPID)
+        strictKillSwitch = try c.decodeIfPresent(Bool.self, forKey: .strictKillSwitch) ?? false
+        protectsIPv6 = try c.decodeIfPresent(Bool.self, forKey: .protectsIPv6) ?? false
+        pfEnableToken = try c.decodeIfPresent(String.self, forKey: .pfEnableToken)
+    }
 
     static var fileURL: URL { URL(fileURLWithPath: VeilHelperInfo.statePath) }
 

@@ -8,7 +8,7 @@ public enum VeilHelperInfo {
 
     /// Bumped whenever the protocol changes. The app refuses to talk to a
     /// helper that does not match and asks the user to reinstall it.
-    public static let protocolVersion = 4
+    public static let protocolVersion = 5
 
     /// Root-owned directory holding the helper, `tun2socks`, the pinned client
     /// requirement and the tunnel state. Nothing here is writable by the user,
@@ -49,6 +49,8 @@ public enum VeilHelperInfo {
                      socksPort: Int,
                      serverIPs: [String],
                      dnsServers: [String],
+                     strictKillSwitch: Bool,
+                     protectIPv6: Bool,
                      reply: @escaping (String?) -> Void)
 
     /// Tears everything down and restores the DNS the user had.
@@ -66,5 +68,5 @@ public enum VeilHelperInfo {
     func removeProbeRoutes(reply: @escaping (String?) -> Void)
 
     /// Whether a tunnel is currently up, and the device it is on.
-    func tunnelStatus(reply: @escaping (Bool, String?) -> Void)
+    func tunnelStatus(reply: @escaping (Bool, String?, Bool, Bool) -> Void)
 }

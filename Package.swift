@@ -27,7 +27,9 @@ let package = Package(
             path: "Sources/XrayClient",
             resources: [
                 .copy("Resources/xray"),
-                .copy("Resources/sing-box")
+                .copy("Resources/xray.sha256"),
+                .copy("Resources/sing-box"),
+                .copy("Resources/sing-box.sha256")
             ]
         ),
         .testTarget(

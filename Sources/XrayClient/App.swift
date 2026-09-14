@@ -24,6 +24,8 @@ struct XrayClientApp: App {
                     connection.mode = store.settings.mode
                     connection.routingRules = store.settings.effectiveRoutingRules
                     connection.logLevel = store.settings.logLevel
+                    connection.killSwitch = store.settings.killSwitch
+                    connection.strictIPv6Protection = store.settings.strictIPv6Protection
                     connection.ports.socks = store.settings.socksPort
                     connection.ports.http = store.settings.httpPort
                     connection.notifyOnConnect = store.settings.notifyOnConnect

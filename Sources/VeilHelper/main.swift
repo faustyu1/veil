@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Security
 import VeilHelperKit
 import os
@@ -10,6 +11,11 @@ import os
 /// routes and DNS back.
 
 private let bootLog = Logger(subsystem: "dev.local.veil.helper", category: "boot")
+
+if Array(CommandLine.arguments.dropFirst()) == ["--cleanup"] {
+    HelperService().cleanupForUninstall()
+    exit(EXIT_SUCCESS)
+}
 
 /// Reads the code-signing requirement the connecting app has to satisfy.
 ///
@@ -34,7 +40,10 @@ private func loadClientRequirement() -> String? {
     guard let data = FileManager.default.contents(atPath: path),
           let text = String(data: data, encoding: .utf8) else { return nil }
     let requirement = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !requirement.isEmpty else { return nil }
+    guard HelperValidation.isAllowedClientRequirement(requirement) else {
+        bootLog.error("client requirement is broader than Veil policy permits")
+        return nil
+    }
 
     // `setCodeSigningRequirement` raises rather than returning an error when the
     // string does not parse, so it is checked here first.
@@ -65,6 +74,9 @@ private final class ListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecke
             log.error("refusing connection: no client requirement installed")
             return false
         }
+        // This API evaluates the requirement against the peer represented by
+        // the XPC audit token; PID, process name and caller-supplied data are
+        // never used as identity.
         connection.setCodeSigningRequirement(requirement)
         connection.exportedInterface = NSXPCInterface(with: VeilHelperProtocol.self)
         connection.exportedObject = service

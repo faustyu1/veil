@@ -39,6 +39,7 @@ unzip -o -q "$TMP/xray.zip" -d "$TMP/extracted"
 
 cp "$TMP/extracted/xray" "$DEST_DIR/xray"
 chmod +x "$DEST_DIR/xray"
+printf '%s %s\n' "$(sha256_of "$DEST_DIR/xray")" "$ARCH" > "$DEST_DIR/xray.sha256"
 
 # Remove the quarantine attribute so Gatekeeper allows execution.
 xattr -dr com.apple.quarantine "$DEST_DIR/xray" 2>/dev/null || true

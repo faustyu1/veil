@@ -53,7 +53,14 @@ jobs:
           swift test
 
       - name: Package Veil.app
-        run: Scripts/package-app.sh "${{ steps.version.outputs.version }}"
+        env:
+          VEIL_CODESIGN_IDENTITY: ${{ secrets.VEIL_CODESIGN_IDENTITY }}
+        run: |
+          if [ -z "${VEIL_CODESIGN_IDENTITY}" ]; then
+            echo "::error::VEIL_CODESIGN_IDENTITY is required for a production helper-capable release."
+            exit 1
+          fi
+          Scripts/package-app.sh "${{ steps.version.outputs.version }}"
 
       # The release body is the CHANGELOG section for this version, so what a
       # user reads on the release page is the text that was reviewed in the PR
