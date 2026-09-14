@@ -1,10 +1,11 @@
 name: iOS
 
+# Manual only. The iOS job builds XrayCore with gomobile and then two app
+# targets, which costs far more runner minutes than it earns on a repository
+# whose releases are the macOS app. Run it from the Actions tab when the iOS
+# sources actually change.
 on:
-  push:
-    branches: [ios, main]
-  pull_request:
-    branches: [ios, main]
+  workflow_dispatch:
 
 jobs:
   build:
