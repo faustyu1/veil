@@ -1,20 +1,17 @@
-// macOS-only: this file drives the system proxy / tun2socks / a bundled
-// core subprocess, none of which exist on iOS. The iOS build runs Xray
-// in-process inside the NetworkExtension instead (see ios/Tunnel).
+// macOS-only: this file drives TUN mode through the privileged helper. The iOS
+// build runs Xray in-process inside the NetworkExtension instead (see
+// ios/Tunnel) and needs none of it.
 #if os(macOS)
 import Foundation
+import VeilHelperKit
 
-/// Manages TUN (full-traffic) mode using `tun2socks` + route manipulation.
+/// Drives TUN (full-traffic) mode.
 ///
-/// First use installs a small root-owned helper + a scoped NOPASSWD sudoers
-/// rule (one admin prompt, ever). After that, bringing the tunnel up/down runs
-/// via `sudo -n` with no password — so switching servers is seamless.
+/// Nothing here runs as root. Route, DNS and `tun2socks` changes are requests
+/// sent to the Veil helper — a launchd daemon that accepts a fixed set of typed
+/// commands from this app and nothing else. Installing it is one admin prompt,
+/// once; there is no sudoers rule and no root-owned shell script.
 enum TunManager {
-
-    static let installDir = "/usr/local/libexec/xrayclient"
-    static let upPath = installDir + "/tun-up.sh"
-    static let downPath = installDir + "/tun-down.sh"
-    static let pingPath = installDir + "/tun-ping.sh"
 
     enum TunError: LocalizedError {
         case missingResource(String)
@@ -24,117 +21,100 @@ enum TunManager {
         var errorDescription: String? {
             switch self {
             case .missingResource(let r): return "Missing bundled resource: \(r)"
-            case .scriptFailed(let m):     return "TUN command failed: \(m)"
-            case .installFailed(let m):    return "Helper install failed: \(m)"
+            case .scriptFailed(let m):    return "TUN command failed: \(m)"
+            case .installFailed(let m):   return "Helper install failed: \(m)"
             }
         }
     }
 
-    // MARK: - Resource lookup
-
-    private static func resource(_ name: String) -> URL? {
-        if let url = ResourceBundle.module?.url(forResource: name, withExtension: nil) { return url }
-        return Bundle.main.url(forResource: name, withExtension: nil)
-    }
-
-    /// Directory that holds the bundled tun2socks + scripts.
-    private static func resourceDir() -> URL? {
-        resource("tun2socks")?.deletingLastPathComponent()
-    }
+    /// Resolvers handed to the system while the tunnel is up. They are queried
+    /// through the tunnel, so they must not be the ISP's.
+    static let defaultTunnelDNS = ["1.1.1.1", "1.0.0.1"]
 
     // MARK: - Helper installation
 
-    /// True if the privileged helper + sudoers rule are already installed AND
-    /// up to date (contains the fast re-pin path + ping helper).
-    static var isHelperInstalled: Bool {
-        guard FileManager.default.isExecutableFile(atPath: upPath),
-              FileManager.default.isExecutableFile(atPath: downPath),
-              FileManager.default.isExecutableFile(atPath: pingPath),
-              FileManager.default.fileExists(atPath: "/etc/sudoers.d/xrayclient") else {
-            return false
-        }
-        // Outdated installs (pre fast-path) should be re-installed once.
-        if let script = try? String(contentsOfFile: upPath, encoding: .utf8) {
-            return script.contains("Fast path")
-        }
-        return false
-    }
+    /// True when the helper is installed, reachable, and speaks this build's
+    /// protocol version.
+    static var isHelperInstalled: Bool { PrivilegedHelper.isReady }
 
-    /// Installs the helper. Shows ONE macOS admin password prompt.
+    /// Installs (or upgrades) the helper. Shows ONE macOS admin prompt.
+    ///
+    /// The installer also pins this exact app binary as the only client the
+    /// helper will talk to, so it has to run again after the app is rebuilt or
+    /// updated — an ad-hoc signature has no stable identity to pin instead.
     static func installHelper() throws {
-        guard let dir = resourceDir() else { throw TunError.missingResource("tun2socks") }
-        guard let installer = resource("install-helper.sh") else {
-            throw TunError.missingResource("install-helper.sh")
+        guard let payload = PrivilegedHelper.bundledPayloadDirectory else {
+            throw TunError.missingResource("Contents/Library/VeilHelper")
         }
-        chmodX(resource("tun2socks"))
-        let cmd = shellQuote(["/bin/bash", installer.path, dir.path])
+        let installer = payload.appendingPathComponent("install-daemon.sh")
+        guard FileManager.default.fileExists(atPath: installer.path) else {
+            throw TunError.missingResource("install-daemon.sh")
+        }
         do {
-            try runAsAdmin(cmd)
+            try runAsAdmin(["/bin/bash", installer.path,
+                            payload.path, Bundle.main.bundleURL.path])
         } catch {
             throw TunError.installFailed(error.localizedDescription)
         }
     }
 
-    /// Removes the helper + sudoers rule (one admin prompt).
+    /// Removes the helper, its payload and any leftovers from the old
+    /// sudoers-based install (one admin prompt).
     static func uninstallHelper() {
-        guard let uninstaller = resource("uninstall-helper.sh") else { return }
-        let cmd = shellQuote(["/bin/bash", uninstaller.path])
-        try? runAsAdmin(cmd)
+        guard let payload = PrivilegedHelper.bundledPayloadDirectory else { return }
+        let uninstaller = payload.appendingPathComponent("uninstall-daemon.sh")
+        guard FileManager.default.fileExists(atPath: uninstaller.path) else { return }
+        try? runAsAdmin(["/bin/bash", uninstaller.path])
     }
 
     // MARK: - Up / Down
 
-    /// Brings TUN up. Installs the helper first if needed (one-time prompt),
-    /// then runs passwordless via `sudo -n`.
-    static func up(socksAddr: String, serverIPs: [String]) throws {
+    /// Brings TUN up, installing the helper first if needed.
+    static func up(socksAddr: String,
+                   serverIPs: [String],
+                   dnsServers: [String] = defaultTunnelDNS) throws {
         if !isHelperInstalled {
             try installHelper()
         }
-        let ips = serverIPs.joined(separator: ",")
-        try runSudoNoPass([upPath, socksAddr, ips])
+        guard let (host, port) = splitAddress(socksAddr) else {
+            throw TunError.scriptFailed("Malformed SOCKS address: \(socksAddr)")
+        }
+        try PrivilegedHelper.startTunnel(socksHost: host, socksPort: port,
+                                         serverIPs: serverIPs,
+                                         dnsServers: dnsServers)
     }
 
-    /// Tears TUN down (passwordless). Best-effort.
+    /// Tears TUN down. Best-effort.
     static func down() {
-        try? runSudoNoPass([downPath])
+        try? PrivilegedHelper.stopTunnel()
     }
 
-    /// True if a tunnel appears to be active on the system (utun123 exists or a
-    /// tun2socks pid file is present) — used to detect orphaned tunnels left by
-    /// a crash or force-quit.
-    static var looksActive: Bool {
-        FileManager.default.fileExists(atPath: "/tmp/xrayclient-tun2socks.pid") ||
-        FileManager.default.fileExists(atPath: "/tmp/xrayclient-tun.state")
-    }
+    /// Whether the helper says a tunnel is up right now.
+    static var looksActive: Bool { PrivilegedHelper.tunnelIsUp }
 
-    /// Runs the down script unconditionally to clean up an orphaned tunnel.
-    /// Safe to call even when nothing is up (down script is idempotent).
+    /// Cleans up a tunnel left behind by a crash or a force-quit.
     static func emergencyCleanup() {
-        guard isHelperInstalled, looksActive else { return }
-        try? runSudoNoPass([downPath])
+        guard PrivilegedHelper.isInstalled, PrivilegedHelper.tunnelIsUp else { return }
+        down()
     }
 
     /// Temporarily route server IPs via the physical gateway so latency probes
-    /// bypass the tunnel. Best-effort; no-op if the helper isn't installed.
+    /// bypass the tunnel. Best-effort; no-op when the tunnel is not up.
     static func pingRouteAdd(_ ips: [String]) {
-        guard isHelperInstalled, !ips.isEmpty else { return }
-        try? runSudoNoPass([pingPath, "add", ips.joined(separator: ",")])
+        guard !ips.isEmpty else { return }
+        try? PrivilegedHelper.addProbeRoutes(ips)
     }
 
-    /// Removes the temporary ping host-routes.
+    /// Removes the temporary probe host-routes.
     static func pingRouteDel() {
-        guard isHelperInstalled else { return }
-        try? runSudoNoPass([pingPath, "del", ""])
+        try? PrivilegedHelper.removeProbeRoutes()
     }
 
     // MARK: - Server IP resolution
 
     /// Resolves a host to IPv4 addresses. IP literals pass through unchanged.
     static func resolveIPs(host: String) -> [String] {
-        if host.allSatisfy({ $0.isNumber || $0 == "." }),
-           host.split(separator: ".").count == 4 {
-            return [host]
-        }
+        if HelperValidation.isIPv4(host) { return [host] }
         var results: [String] = []
         var hints = addrinfo(ai_flags: 0, ai_family: AF_INET, ai_socktype: SOCK_STREAM,
                              ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil,
@@ -158,31 +138,29 @@ enum TunManager {
         return results
     }
 
-    // MARK: - Privileged execution
+    // MARK: - Internals
 
-    /// Runs `sudo -n <argv>` (non-interactive; relies on the NOPASSWD rule).
-    private static func runSudoNoPass(_ argv: [String]) throws {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        proc.arguments = ["-n"] + argv
-        let errPipe = Pipe()
-        proc.standardError = errPipe
-        proc.standardOutput = Pipe()
-        try proc.run()
-        proc.waitUntilExit()
-        if proc.terminationStatus != 0 {
-            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            let msg = String(data: data, encoding: .utf8) ?? "exit \(proc.terminationStatus)"
-            throw TunError.scriptFailed(msg.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
+    /// Splits `127.0.0.1:10808` into its parts.
+    static func splitAddress(_ address: String) -> (host: String, port: Int)? {
+        guard let separator = address.lastIndex(of: ":") else { return nil }
+        let host = String(address[address.startIndex..<separator])
+        guard let port = Int(address[address.index(after: separator)...]),
+              HelperValidation.isPort(port), !host.isEmpty else { return nil }
+        return (host, port)
     }
 
-    /// Runs a command as root via AppleScript's admin prompt (password dialog).
-    private static func runAsAdmin(_ shellCommand: String) throws {
-        let escaped = shellCommand
+    /// Runs the installer as root via AppleScript's admin prompt. This is the
+    /// only place the app asks for a password, and the only thing it ever runs
+    /// this way is one of its own two bundled installer scripts.
+    private static func runAsAdmin(_ argv: [String]) throws {
+        let command = argv
+            .map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+            .joined(separator: " ")
+        let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let appleScript = "do shell script \"\(escaped)\" with administrator privileges"
+
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         proc.arguments = ["-e", appleScript]
@@ -196,17 +174,6 @@ enum TunManager {
             let msg = String(data: data, encoding: .utf8) ?? "exit \(proc.terminationStatus)"
             throw TunError.scriptFailed(msg.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-    }
-
-    private static func chmodX(_ url: URL?) {
-        guard let url else { return }
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: url.path)
-    }
-
-    private static func shellQuote(_ args: [String]) -> String {
-        args.map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-            .joined(separator: " ")
     }
 }
 #endif

@@ -3,6 +3,9 @@
 # Sources/XrayClient/Resources/. Used for the TUN (full-traffic) mode.
 set -euo pipefail
 
+# shellcheck source=Scripts/core-lock.sh
+source "$(cd "$(dirname "$0")" && pwd)/core-lock.sh"
+
 REPO="xjasonlyu/tun2socks"
 DEST_DIR="$(cd "$(dirname "$0")/.." && pwd)/Sources/XrayClient/Resources"
 mkdir -p "${DEST_DIR}"
@@ -14,15 +17,12 @@ case "${ARCH}" in
   *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;;
 esac
 
-# Resolve latest tag via the releases/latest redirect (avoids API 403).
-echo "Resolving latest tun2socks release..."
-TAG="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
-  "https://github.com/${REPO}/releases/latest" | sed -E 's#.*/tag/##')"
-if [ -z "${TAG}" ]; then
-  echo "Could not resolve latest release tag." >&2
+# Pinned release from Scripts/cores.lock, or the latest one when unpinned.
+TAG="$(resolve_tag "${REPO}" tun2socks "${ARCH}")" || {
+  echo "Could not resolve a tun2socks release tag." >&2
   exit 1
-fi
-echo "Latest release: ${TAG}"
+}
+echo "tun2socks release: ${TAG}"
 
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
 TMP="$(mktemp -d)"
@@ -30,6 +30,9 @@ trap 'rm -rf "${TMP}"' EXIT
 
 echo "Downloading ${ASSET}..."
 curl -fsSL "${URL}" -o "${TMP}/t2s.zip"
+
+verify_asset tun2socks "${ARCH}" "${TMP}/t2s.zip" || exit 1
+record_asset tun2socks "${ARCH}" "${TAG}" "${TMP}/t2s.zip"
 
 echo "Extracting..."
 unzip -o -q "${TMP}/t2s.zip" -d "${TMP}/extracted"

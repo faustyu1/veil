@@ -78,6 +78,9 @@ struct AppSettings: Codable, Equatable {
 
     // Subscription
     var sendHwid: Bool = true
+    /// Overrides the User-Agent sent with subscription requests. Empty means
+    /// the default one. Panels with custom Response Rules key off it.
+    var userAgentOverride: String = ""
 
     // Tunnel shape. Only the iOS build reads these — there the whole tunnel is
     // Xray's own layer-3 inbound behind NetworkExtension, so the interface MTU,
@@ -115,6 +118,7 @@ struct AppSettings: Codable, Equatable {
         launchAtLogin = get(.launchAtLogin, false)
         notifyOnConnect = get(.notifyOnConnect, false)
         sendHwid = get(.sendHwid, true)
+        userAgentOverride = get(.userAgentOverride, "")
         tunnelMTU = get(.tunnelMTU, 1500)
         ipv6Enabled = get(.ipv6Enabled, true)
         dnsServers = get(.dnsServers, ["1.1.1.1", "8.8.8.8"])

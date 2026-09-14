@@ -3,6 +3,9 @@
 # Detects CPU architecture (arm64 / x86_64) automatically.
 set -euo pipefail
 
+# shellcheck source=Scripts/core-lock.sh
+source "$(cd "$(dirname "$0")" && pwd)/core-lock.sh"
+
 REPO="XTLS/Xray-core"
 DEST_DIR="$(cd "$(dirname "$0")/.." && pwd)/Sources/XrayClient/Resources"
 mkdir -p "$DEST_DIR"
@@ -14,16 +17,12 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 
-# Resolve the latest release tag. Use the releases/latest redirect rather than
-# the GitHub API to avoid unauthenticated rate limits (HTTP 403).
-echo "Resolving latest Xray-core release..."
-TAG="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
-  "https://github.com/$REPO/releases/latest" | sed -E 's#.*/tag/##')"
-if [ -z "${TAG}" ]; then
-  echo "Could not resolve latest release tag." >&2
+# Pinned release from Scripts/cores.lock, or the latest one when unpinned.
+TAG="$(resolve_tag "$REPO" xray "$ARCH")" || {
+  echo "Could not resolve an Xray-core release tag." >&2
   exit 1
-fi
-echo "Latest release: ${TAG}"
+}
+echo "Xray-core release: ${TAG}"
 
 URL="https://github.com/$REPO/releases/download/${TAG}/${ASSET}"
 TMP="$(mktemp -d)"
@@ -31,6 +30,9 @@ trap 'rm -rf "$TMP"' EXIT
 
 echo "Downloading ${ASSET}..."
 curl -fsSL "${URL}" -o "$TMP/xray.zip"
+
+verify_asset xray "$ARCH" "$TMP/xray.zip" || exit 1
+record_asset xray "$ARCH" "${TAG}" "$TMP/xray.zip"
 
 echo "Extracting..."
 unzip -o -q "$TMP/xray.zip" -d "$TMP/extracted"

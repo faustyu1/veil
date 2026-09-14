@@ -7,23 +7,32 @@ let package = Package(
         .macOS(.v14)
     ],
     targets: [
+        // Protocol and validation shared by the app and the privileged helper.
+        // Kept tiny on purpose: it is the only code that exists on both sides
+        // of the privilege boundary.
+        .target(
+            name: "VeilHelperKit",
+            path: "Sources/VeilHelperKit"
+        ),
+        // The privileged helper itself — a launchd daemon that runs as root and
+        // accepts a fixed set of typed commands from the app.
+        .executableTarget(
+            name: "VeilHelper",
+            dependencies: ["VeilHelperKit"],
+            path: "Sources/VeilHelper"
+        ),
         .executableTarget(
             name: "XrayClient",
+            dependencies: ["VeilHelperKit"],
             path: "Sources/XrayClient",
             resources: [
                 .copy("Resources/xray"),
-                .copy("Resources/sing-box"),
-                .copy("Resources/tun2socks"),
-                .copy("Resources/tun-up.sh"),
-                .copy("Resources/tun-down.sh"),
-                .copy("Resources/tun-ping.sh"),
-                .copy("Resources/install-helper.sh"),
-                .copy("Resources/uninstall-helper.sh")
+                .copy("Resources/sing-box")
             ]
         ),
         .testTarget(
             name: "XrayClientTests",
-            dependencies: ["XrayClient"],
+            dependencies: ["XrayClient", "VeilHelperKit"],
             path: "Tests/XrayClientTests"
         )
     ]

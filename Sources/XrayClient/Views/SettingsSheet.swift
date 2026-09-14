@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Basic app settings: tunnel mode, appearance, auto-update, close-to-tray, ports.
 struct SettingsSheet: View {
@@ -9,6 +10,8 @@ struct SettingsSheet: View {
 
     @State private var helperInstalled = TunManager.isHelperInstalled
     @State private var showRouting = false
+    @State private var hwidFingerprint = Redaction.fingerprint(DeviceID.hwid)
+    @State private var diagnosticsCopied = false
 
     var body: some View {
         @Bindable var store = store
@@ -124,6 +127,48 @@ struct SettingsSheet: View {
                         .onChange(of: store.settings.sendHwid) { _, _ in store.save() }
                     Text(loc("Identifies this device to providers that require it."))
                         .font(.caption).foregroundStyle(.secondary)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(loc("Device ID"))
+                            Text(hwidFingerprint)
+                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(loc("Regenerate")) {
+                            DeviceID.regenerate()
+                            hwidFingerprint = Redaction.fingerprint(DeviceID.hwid)
+                        }
+                        .glassButton()
+                    }
+                    Text(loc("A new ID looks like a new device to your provider and may use up a device slot."))
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    TextField(loc("User-Agent (optional)"),
+                              text: $store.settings.userAgentOverride)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { store.save() }
+                    Text(loc("Leave empty unless your provider's rules expect a particular client."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section(loc("Privacy")) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(loc("Export diagnostics"))
+                            Text(loc("Copies a report with subscription URLs, tokens and IDs removed."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(diagnosticsCopied ? loc("Copied") : loc("Copy")) {
+                            let report = Diagnostics.report(store: store,
+                                                            logText: connection.logs)
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(report, forType: .string)
+                            diagnosticsCopied = true
+                        }
+                        .glassButton()
+                    }
                 }
 
                 Section(loc("Window")) {

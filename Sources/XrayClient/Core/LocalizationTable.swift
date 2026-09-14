@@ -791,5 +791,75 @@ extension Loc {
             "ru": "Удерживайте, чтобы отключить", "zh": "长按以断开", "es": "Mantén pulsado para desconectar", "hi": "डिस्कनेक्ट करने के लिए दबाए रखें",
             "ar": "اضغط مطولًا لقطع الاتصال", "fr": "Maintenez pour déconnecter", "pt": "Mantenha pressionado para desconectar", "de": "Zum Trennen gedrückt halten",
             "ja": "長押しで切断", "id": "Tahan untuk memutuskan", "tr": "Bağlantıyı kesmek için basılı tutun"],
+
+        // MARK: Privacy / device identity
+        "Regenerate": [
+            "ru": "Сгенерировать заново", "zh": "重新生成", "es": "Regenerar",
+            "hi": "फिर से बनाएँ", "ar": "إعادة التوليد", "fr": "Régénérer",
+            "pt": "Regenerar", "de": "Neu erzeugen", "ja": "再生成",
+            "id": "Buat ulang", "tr": "Yeniden oluştur"],
+        "A new ID looks like a new device to your provider and may use up a device slot.": [
+            "ru": "Новый ID выглядит для провайдера как новое устройство и может занять слот.",
+            "zh": "新的 ID 在提供商看来是一台新设备，可能会占用一个设备名额。",
+            "es": "Un ID nuevo parece un dispositivo nuevo para tu proveedor y puede ocupar una plaza.",
+            "hi": "नया ID आपके प्रोवाइडर को नया डिवाइस लगता है और एक डिवाइस स्लॉट ले सकता है।",
+            "ar": "المعرّف الجديد يبدو لمزوّدك كجهاز جديد وقد يستهلك خانة جهاز.",
+            "fr": "Un nouvel ID apparaît comme un nouvel appareil pour votre fournisseur et peut consommer un emplacement.",
+            "pt": "Um ID novo parece um dispositivo novo para o seu provedor e pode ocupar uma vaga.",
+            "de": "Eine neue ID wirkt für deinen Anbieter wie ein neues Gerät und kann einen Geräteplatz belegen.",
+            "ja": "新しい ID はプロバイダーには新しい端末として見えるため、端末枠を消費することがあります。",
+            "id": "ID baru terlihat seperti perangkat baru bagi penyedia dan bisa memakai satu slot perangkat.",
+            "tr": "Yeni bir kimlik, sağlayıcınıza yeni bir cihaz gibi görünür ve bir cihaz hakkını kullanabilir."],
+        "User-Agent (optional)": [
+            "ru": "User-Agent (необязательно)", "zh": "User-Agent（可选）",
+            "es": "User-Agent (opcional)", "hi": "User-Agent (वैकल्पिक)",
+            "ar": "User-Agent (اختياري)", "fr": "User-Agent (facultatif)",
+            "pt": "User-Agent (opcional)", "de": "User-Agent (optional)",
+            "ja": "User-Agent（任意）", "id": "User-Agent (opsional)",
+            "tr": "User-Agent (isteğe bağlı)"],
+        "Leave empty unless your provider's rules expect a particular client.": [
+            "ru": "Оставьте пустым, если правила провайдера не ждут конкретный клиент.",
+            "zh": "除非提供商的规则需要特定客户端，否则请留空。",
+            "es": "Déjalo vacío salvo que las reglas de tu proveedor esperen un cliente concreto.",
+            "hi": "खाली छोड़ें, जब तक आपके प्रोवाइडर के नियम किसी खास क्लाइंट की अपेक्षा न करें।",
+            "ar": "اتركه فارغًا ما لم تكن قواعد مزوّدك تتوقع عميلًا معيّنًا.",
+            "fr": "Laissez vide, sauf si les règles de votre fournisseur attendent un client précis.",
+            "pt": "Deixe vazio, a menos que as regras do seu provedor esperem um cliente específico.",
+            "de": "Leer lassen, sofern die Regeln deines Anbieters keinen bestimmten Client erwarten.",
+            "ja": "プロバイダーのルールが特定のクライアントを求めていない限り、空のままにしてください。",
+            "id": "Biarkan kosong kecuali aturan penyedia Anda mengharapkan klien tertentu.",
+            "tr": "Sağlayıcınızın kuralları belirli bir istemci beklemiyorsa boş bırakın."],
+        "Privacy": [
+            "ru": "Приватность", "zh": "隐私", "es": "Privacidad", "hi": "गोपनीयता",
+            "ar": "الخصوصية", "fr": "Confidentialité", "pt": "Privacidade",
+            "de": "Datenschutz", "ja": "プライバシー", "id": "Privasi", "tr": "Gizlilik"],
+        "Export diagnostics": [
+            "ru": "Экспорт диагностики", "zh": "导出诊断信息",
+            "es": "Exportar diagnóstico", "hi": "डायग्नोस्टिक्स निर्यात करें",
+            "ar": "تصدير التشخيص", "fr": "Exporter le diagnostic",
+            "pt": "Exportar diagnóstico", "de": "Diagnose exportieren",
+            "ja": "診断情報を書き出す", "id": "Ekspor diagnostik",
+            "tr": "Tanılamayı dışa aktar"],
+        "Copies a report with subscription URLs, tokens and IDs removed.": [
+            "ru": "Копирует отчёт без URL подписок, токенов и идентификаторов.",
+            "zh": "复制的报告已移除订阅链接、令牌和标识符。",
+            "es": "Copia un informe sin URLs de suscripción, tokens ni identificadores.",
+            "hi": "रिपोर्ट कॉपी करता है जिसमें सब्सक्रिप्शन URL, टोकन और ID हटा दिए गए हों।",
+            "ar": "ينسخ تقريرًا بعد إزالة روابط الاشتراك والرموز والمعرّفات.",
+            "fr": "Copie un rapport sans URL d'abonnement, jetons ni identifiants.",
+            "pt": "Copia um relatório sem URLs de assinatura, tokens e identificadores.",
+            "de": "Kopiert einen Bericht ohne Abo-URLs, Token und Kennungen.",
+            "ja": "購読 URL・トークン・識別子を取り除いたレポートをコピーします。",
+            "id": "Menyalin laporan tanpa URL langganan, token, dan pengenal.",
+            "tr": "Abonelik adresleri, belirteçler ve kimlikler çıkarılmış bir rapor kopyalar."],
+        "Copy": [
+            "ru": "Копировать", "zh": "复制", "es": "Copiar", "hi": "कॉपी करें",
+            "ar": "نسخ", "fr": "Copier", "pt": "Copiar", "de": "Kopieren",
+            "ja": "コピー", "id": "Salin", "tr": "Kopyala"],
+        "Copied": [
+            "ru": "Скопировано", "zh": "已复制", "es": "Copiado", "hi": "कॉपी हो गया",
+            "ar": "تم النسخ", "fr": "Copié", "pt": "Copiado", "de": "Kopiert",
+            "ja": "コピーしました", "id": "Disalin", "tr": "Kopyalandı"],
+
     ]
 }

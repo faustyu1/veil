@@ -1,0 +1,351 @@
+import Foundation
+
+/// A subscription response body, recognised rather than flattened.
+///
+/// Veil used to run every response through the share-link parser, so a panel
+/// that answered with a full `XRAY_JSON` template lost its routing, balancers,
+/// observatory and DNS on the way in. The body is now classified first and kept
+/// verbatim, so nothing is thrown away before the config model can use it.
+struct SubscriptionPayload: Equatable {
+
+    enum Format: String, Codable, Equatable {
+        /// A complete Xray-core config document.
+        case xrayJSON
+        /// A complete Xray-core config document, base64-wrapped.
+        case xrayBase64
+        /// A complete sing-box config document.
+        case singbox
+        /// A Mihomo / Clash YAML profile.
+        case mihomoYAML
+        /// Newline-separated share links.
+        case links
+        /// Newline-separated share links, base64-wrapped.
+        case base64Links
+        /// Nothing we recognise.
+        case unknown
+
+        /// True when the body is a whole core config rather than a node list.
+        var isFullConfig: Bool {
+            self == .xrayJSON || self == .xrayBase64 || self == .singbox || self == .mihomoYAML
+        }
+    }
+
+    /// Exactly what the server sent, byte for byte.
+    var raw: String
+    var format: Format
+    /// Nodes Veil can connect to today.
+    var servers: [ProxyConfig]
+    /// The config document, decoded out of any base64 wrapper — the routing,
+    /// balancers and DNS the node list cannot carry.
+    var configJSON: String?
+
+    static func == (lhs: SubscriptionPayload, rhs: SubscriptionPayload) -> Bool {
+        lhs.raw == rhs.raw && lhs.format == rhs.format
+            && lhs.servers == rhs.servers && lhs.configJSON == rhs.configJSON
+    }
+}
+
+/// Classifies and decodes a subscription body.
+enum SubscriptionPayloadParser {
+
+    static func parse(_ body: String) -> SubscriptionPayload {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return SubscriptionPayload(raw: body, format: .unknown, servers: [], configJSON: nil)
+        }
+
+        if let json = jsonObject(from: trimmed) {
+            return fromJSON(json, raw: body, text: trimmed, wasBase64: false)
+        }
+
+        // A base64 wrapper can hide either a link list or a whole config.
+        if let data = LinkParser.decodeBase64(trimmed),
+           let decoded = String(data: data, encoding: .utf8) {
+            let inner = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let json = jsonObject(from: inner) {
+                return fromJSON(json, raw: body, text: inner, wasBase64: true)
+            }
+            if inner.contains("://") {
+                return SubscriptionPayload(raw: body, format: .base64Links,
+                                           servers: LinkParser.parseMany(inner),
+                                           configJSON: nil)
+            }
+        }
+
+        if looksLikeMihomoYAML(trimmed) {
+            return SubscriptionPayload(raw: body, format: .mihomoYAML,
+                                       servers: [], configJSON: nil)
+        }
+
+        if trimmed.contains("://") {
+            return SubscriptionPayload(raw: body, format: .links,
+                                       servers: LinkParser.parseMany(trimmed),
+                                       configJSON: nil)
+        }
+
+        return SubscriptionPayload(raw: body, format: .unknown, servers: [], configJSON: nil)
+    }
+
+    // MARK: - JSON bodies
+
+    private static func fromJSON(_ json: [String: Any], raw: String,
+                                 text: String, wasBase64: Bool) -> SubscriptionPayload {
+        let outbounds = (json["outbounds"] as? [[String: Any]]) ?? []
+
+        if isSingBox(json, outbounds: outbounds) {
+            let endpoints = (json["endpoints"] as? [[String: Any]]) ?? []
+            return SubscriptionPayload(
+                raw: raw, format: .singbox,
+                servers: singBoxServers(outbounds + endpoints),
+                configJSON: text)
+        }
+
+        return SubscriptionPayload(
+            raw: raw, format: wasBase64 ? .xrayBase64 : .xrayJSON,
+            servers: xrayServers(outbounds),
+            configJSON: text)
+    }
+
+    /// sing-box and Xray configs both have `outbounds`. They are told apart by
+    /// the route key (`route` vs `routing`) and by how an outbound names its
+    /// protocol (`type` vs `protocol`).
+    private static func isSingBox(_ json: [String: Any], outbounds: [[String: Any]]) -> Bool {
+        if json["routing"] != nil { return false }
+        if json["route"] != nil || json["endpoints"] != nil { return true }
+        if outbounds.contains(where: { $0["protocol"] != nil }) { return false }
+        return outbounds.contains { $0["type"] != nil }
+    }
+
+    private static func jsonObject(from text: String) -> [String: Any]? {
+        guard text.hasPrefix("{"), let data = text.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// A Clash/Mihomo profile is YAML with a `proxies:` block plus groups or
+    /// rules. Checked line by line rather than by regex so a `proxies:` that
+    /// appears inside a value cannot pass for a top-level key.
+    private static func looksLikeMihomoYAML(_ text: String) -> Bool {
+        var hasProxies = false
+        var hasGroupsOrRules = false
+        for rawLine in text.split(separator: "\n") {
+            // Top level only: an indented `rules:` belongs to something else.
+            guard let first = rawLine.first, first != " ", first != "\t" else { continue }
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.hasPrefix("proxies:") { hasProxies = true }
+            if line.hasPrefix("proxy-groups:") || line.hasPrefix("rules:") {
+                hasGroupsOrRules = true
+            }
+        }
+        return hasProxies && hasGroupsOrRules
+    }
+
+    // MARK: - Xray outbounds
+
+    /// Maps the outbounds of an Xray config onto connectable nodes. Outbounds
+    /// that are not servers (`freedom`, `blackhole`, `dns`) are skipped, and so
+    /// is anything whose protocol Veil cannot run.
+    static func xrayServers(_ outbounds: [[String: Any]]) -> [ProxyConfig] {
+        var result: [ProxyConfig] = []
+        for outbound in outbounds {
+            guard let name = outbound["protocol"] as? String,
+                  let proto = protocolNamed(name) else { continue }
+            let tag = (outbound["tag"] as? String) ?? name
+            let settings = (outbound["settings"] as? [String: Any]) ?? [:]
+            let stream = (outbound["streamSettings"] as? [String: Any]) ?? [:]
+
+            switch proto {
+            case .vless, .vmess:
+                for peer in settings["vnext"] as? [[String: Any]] ?? [] {
+                    guard let address = peer["address"] as? String,
+                          let port = intValue(peer["port"]) else { continue }
+                    var config = ProxyConfig(name: tag, proto: proto,
+                                             address: address, port: port)
+                    if let user = (peer["users"] as? [[String: Any]])?.first {
+                        config.uuid = user["id"] as? String
+                        config.flow = nonEmpty(user["flow"] as? String)
+                        config.encryption = nonEmpty(user["encryption"] as? String)
+                        config.alterId = intValue(user["alterId"])
+                    }
+                    applyStream(stream, to: &config)
+                    result.append(config)
+                }
+            case .trojan, .shadowsocks:
+                for peer in settings["servers"] as? [[String: Any]] ?? [] {
+                    guard let address = peer["address"] as? String,
+                          let port = intValue(peer["port"]) else { continue }
+                    var config = ProxyConfig(name: tag, proto: proto,
+                                             address: address, port: port)
+                    config.password = peer["password"] as? String
+                    config.method = nonEmpty(peer["method"] as? String)
+                    applyStream(stream, to: &config)
+                    result.append(config)
+                }
+            case .hysteria2, .tuic, .wireguard, .anytls:
+                // Not Xray protocols; a config claiming them is malformed.
+                continue
+            }
+        }
+        return result
+    }
+
+    private static func applyStream(_ stream: [String: Any], to config: inout ProxyConfig) {
+        if let network = stream["network"] as? String,
+           let parsed = TransportNetwork(rawValue: network.lowercased()) {
+            config.network = parsed
+        }
+        if let security = stream["security"] as? String,
+           let parsed = StreamSecurity(rawValue: security.lowercased()) {
+            config.security = parsed
+        }
+
+        if let tls = stream["tlsSettings"] as? [String: Any] {
+            config.sni = nonEmpty(tls["serverName"] as? String)
+            config.alpn = tls["alpn"] as? [String]
+            config.fingerprint = nonEmpty(tls["fingerprint"] as? String)
+            config.allowInsecure = (tls["allowInsecure"] as? Bool) ?? false
+        }
+        if let reality = stream["realitySettings"] as? [String: Any] {
+            config.security = .reality
+            config.sni = nonEmpty(reality["serverName"] as? String) ?? config.sni
+            config.fingerprint = nonEmpty(reality["fingerprint"] as? String) ?? config.fingerprint
+            config.publicKey = nonEmpty(reality["publicKey"] as? String)
+            config.shortId = nonEmpty(reality["shortId"] as? String)
+            config.spiderX = nonEmpty(reality["spiderX"] as? String)
+        }
+        if let ws = stream["wsSettings"] as? [String: Any] {
+            config.path = nonEmpty(ws["path"] as? String)
+            config.host = nonEmpty((ws["headers"] as? [String: Any])?["Host"] as? String)
+                ?? nonEmpty(ws["host"] as? String)
+        }
+        if let grpc = stream["grpcSettings"] as? [String: Any] {
+            config.serviceName = nonEmpty(grpc["serviceName"] as? String)
+        }
+        if let http = stream["httpSettings"] as? [String: Any] {
+            config.path = nonEmpty(http["path"] as? String) ?? config.path
+            config.host = nonEmpty((http["host"] as? [String])?.first) ?? config.host
+        }
+        if let xhttp = stream["xhttpSettings"] as? [String: Any] {
+            config.path = nonEmpty(xhttp["path"] as? String) ?? config.path
+            config.host = nonEmpty(xhttp["host"] as? String) ?? config.host
+            config.xhttpMode = nonEmpty(xhttp["mode"] as? String)
+            if let extra = xhttp["extra"], let data = try? JSONSerialization.data(withJSONObject: extra) {
+                config.xhttpExtra = String(data: data, encoding: .utf8)
+            }
+        }
+    }
+
+    // MARK: - sing-box outbounds
+
+    /// Maps sing-box outbounds (and 1.11-style `endpoints`) onto nodes.
+    /// Selectors, url-tests and the built-in direct/block outbounds are skipped.
+    static func singBoxServers(_ outbounds: [[String: Any]]) -> [ProxyConfig] {
+        var result: [ProxyConfig] = []
+        for outbound in outbounds {
+            guard let type = outbound["type"] as? String else { continue }
+            guard let proto = protocolNamed(type) else { continue }
+            guard let address = (outbound["server"] as? String) ?? firstLocalAddress(outbound),
+                  !address.isEmpty else { continue }
+            let port = intValue(outbound["server_port"]) ?? defaultPort(proto)
+            let tag = (outbound["tag"] as? String) ?? type
+
+            var config = ProxyConfig(name: tag, proto: proto, address: address, port: port)
+            config.uuid = nonEmpty(outbound["uuid"] as? String)
+            config.password = nonEmpty(outbound["password"] as? String)
+            config.method = nonEmpty(outbound["method"] as? String)
+            config.flow = nonEmpty(outbound["flow"] as? String)
+            config.alterId = intValue(outbound["alter_id"])
+            config.congestionControl = nonEmpty(outbound["congestion_control"] as? String)
+            config.udpRelayMode = nonEmpty(outbound["udp_relay_mode"] as? String)
+            config.upMbps = intValue(outbound["up_mbps"])
+            config.downMbps = intValue(outbound["down_mbps"])
+
+            if let obfs = outbound["obfs"] as? [String: Any] {
+                config.obfs = nonEmpty(obfs["type"] as? String)
+                config.obfsPassword = nonEmpty(obfs["password"] as? String)
+            }
+            if proto == .wireguard {
+                config.privateKey = nonEmpty(outbound["private_key"] as? String)
+                config.localAddresses = outbound["address"] as? [String]
+                    ?? outbound["local_address"] as? [String]
+                config.mtu = intValue(outbound["mtu"])
+                if let peer = (outbound["peers"] as? [[String: Any]])?.first {
+                    config.peerPublicKey = nonEmpty(peer["public_key"] as? String)
+                    config.presharedKey = nonEmpty(peer["pre_shared_key"] as? String)
+                    config.reserved = peer["reserved"] as? [Int]
+                } else {
+                    config.peerPublicKey = nonEmpty(outbound["peer_public_key"] as? String)
+                    config.presharedKey = nonEmpty(outbound["pre_shared_key"] as? String)
+                    config.reserved = outbound["reserved"] as? [Int]
+                }
+            }
+
+            applyTLS(outbound["tls"] as? [String: Any], to: &config)
+            applyTransport(outbound["transport"] as? [String: Any], to: &config)
+            result.append(config)
+        }
+        return result
+    }
+
+    private static func applyTLS(_ tls: [String: Any]?, to config: inout ProxyConfig) {
+        guard let tls, (tls["enabled"] as? Bool) ?? false else { return }
+        config.security = .tls
+        config.sni = nonEmpty(tls["server_name"] as? String)
+        config.alpn = tls["alpn"] as? [String]
+        config.allowInsecure = (tls["insecure"] as? Bool) ?? false
+        if let utls = tls["utls"] as? [String: Any] {
+            config.fingerprint = nonEmpty(utls["fingerprint"] as? String)
+        }
+        if let reality = tls["reality"] as? [String: Any],
+           (reality["enabled"] as? Bool) ?? false {
+            config.security = .reality
+            config.publicKey = nonEmpty(reality["public_key"] as? String)
+            config.shortId = nonEmpty(reality["short_id"] as? String)
+        }
+    }
+
+    private static func applyTransport(_ transport: [String: Any]?, to config: inout ProxyConfig) {
+        guard let transport, let type = transport["type"] as? String else { return }
+        if let network = TransportNetwork(rawValue: type.lowercased()) {
+            config.network = network
+        }
+        config.path = nonEmpty(transport["path"] as? String)
+        config.serviceName = nonEmpty(transport["service_name"] as? String)
+        if let host = (transport["headers"] as? [String: Any])?["Host"] {
+            config.host = nonEmpty(host as? String) ?? nonEmpty((host as? [String])?.first)
+        } else if let hosts = transport["host"] as? [String] {
+            config.host = nonEmpty(hosts.first)
+        } else {
+            config.host = nonEmpty(transport["host"] as? String) ?? config.host
+        }
+    }
+
+    private static func firstLocalAddress(_ outbound: [String: Any]) -> String? {
+        (outbound["local_address"] as? [String])?.first
+    }
+
+    private static func defaultPort(_ proto: ProxyProtocol) -> Int {
+        proto == .wireguard ? 51820 : 443
+    }
+
+    // MARK: - Small helpers
+
+    /// Both cores spell Shadowsocks out in full; the share-link scheme (and so
+    /// `ProxyProtocol`'s raw value) is `ss`.
+    private static func protocolNamed(_ name: String) -> ProxyProtocol? {
+        let normalized = name.lowercased()
+        if normalized == "shadowsocks" { return .shadowsocks }
+        return ProxyProtocol(rawValue: normalized)
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let int = value as? Int { return int }
+        if let number = value as? NSNumber { return number.intValue }
+        if let string = value as? String { return Int(string) }
+        return nil
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+}
