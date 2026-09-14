@@ -28,11 +28,23 @@ mkdir -p "${APP_DIR}/Contents/Resources"
 # Executable (renamed to the user-facing app name).
 cp "${BIN_PATH}/${BUILD_NAME}" "${APP_DIR}/Contents/MacOS/${APP_NAME}"
 
-# Bundled resources (xray + tun2socks binaries live in the SPM resource bundle).
+# Bundled resources (the xray and sing-box binaries live in the SPM resource bundle).
 BUNDLE="${BIN_PATH}/${BUILD_NAME}_${BUILD_NAME}.bundle"
 if [ -d "${BUNDLE}" ]; then
   cp -R "${BUNDLE}" "${APP_DIR}/Contents/Resources/"
 fi
+
+# Privileged helper payload. Nothing here runs until the user installs it from
+# Settings, which copies it to a root-owned directory after one admin prompt.
+HELPER_DIR="${APP_DIR}/Contents/Library/VeilHelper"
+mkdir -p "${HELPER_DIR}"
+cp "${BIN_PATH}/VeilHelper" "${HELPER_DIR}/VeilHelper"
+if [ -f "${ROOT}/Sources/XrayClient/Resources/tun2socks" ]; then
+  cp "${ROOT}/Sources/XrayClient/Resources/tun2socks" "${HELPER_DIR}/tun2socks"
+fi
+cp "${ROOT}/Scripts/install-daemon.sh" "${HELPER_DIR}/install-daemon.sh"
+cp "${ROOT}/Scripts/uninstall-daemon.sh" "${HELPER_DIR}/uninstall-daemon.sh"
+chmod +x "${HELPER_DIR}"/* 2>/dev/null || true
 
 # App icon, if present.
 ICON_LINE=""

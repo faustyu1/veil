@@ -13,20 +13,29 @@ final class ServerStore {
     private let fileURL: URL
 
     init() {
-        let fm = FileManager.default
         #if os(iOS)
         // Live in the shared app group so the tunnel extension reads the same
         // servers and settings the app writes.
         let dir = AppGroup.supportDirectory
         #else
+        let fm = FileManager.default
         let base = (try? fm.url(for: .applicationSupportDirectory,
                                 in: .userDomainMask,
                                 appropriateFor: nil,
                                 create: true)) ?? fm.temporaryDirectory
         let dir = base.appendingPathComponent("XrayClient", isDirectory: true)
         #endif
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        self.fileURL = dir.appendingPathComponent("store.json")
+        // Whether an earlier build already ran here has to be answered before
+        // anything is written, because the first save would otherwise make
+        // every fresh install look like an upgrade. `DeviceID` uses it to
+        // decide if there is an identifier worth carrying forward.
+        let store = dir.appendingPathComponent("store.json")
+        DeviceID.isUpgrade = FileManager.default.fileExists(atPath: store.path)
+
+        // Application Support is world-readable by default and this file holds
+        // server addresses, UUIDs and passwords.
+        SecureFile.ensureDirectory(dir)
+        self.fileURL = store
         load()
         selectedServerID = settings.lastSelectedServerID
     }
@@ -82,39 +91,42 @@ final class ServerStore {
 
     // MARK: - Subscriptions
 
+    /// Adds or refreshes a subscription; everything the panel reported in its
+    /// response headers lands on the profile.
     func addOrUpdateSubscription(name: String, url: String,
                                  servers: [ProxyConfig],
-                                 userinfo: SubscriptionUserinfo.Info?,
-                                 announce: String? = nil) {
+                                 metadata: SubscriptionMetadata,
+                                 format: SubscriptionPayload.Format?) {
         let idx = subscriptions.firstIndex { $0.url == url }
         if let idx {
             // Preserve UI state and identity, refresh the contents.
             subscriptions[idx].name = name
             subscriptions[idx].servers = servers
             subscriptions[idx].lastUpdated = Date()
-            if let announce { subscriptions[idx].note = announce }
-            applyUserinfo(userinfo, to: idx)
+            subscriptions[idx].lastFormat = format
+            subscriptions[idx].apply(metadata)
         } else {
             var sub = Subscription(name: name, url: url)
             sub.servers = servers
             sub.lastUpdated = Date()
-            sub.note = announce
+            sub.lastFormat = format
+            sub.apply(metadata)
             subscriptions.append(sub)
-            applyUserinfo(userinfo, to: subscriptions.count - 1)
         }
         save()
     }
 
-    private func applyUserinfo(_ info: SubscriptionUserinfo.Info?, to idx: Int) {
-        guard let info else { return }
-        subscriptions[idx].uploadBytes = info.upload
-        subscriptions[idx].downloadBytes = info.download
-        subscriptions[idx].totalBytes = info.total
-        subscriptions[idx].expiresAt = info.expire
+    /// Applies an in-place edit to one subscription and persists it.
+    func mutateSubscription(id: UUID, _ body: (inout Subscription) -> Void) {
+        guard let idx = subscriptions.firstIndex(where: { $0.id == id }) else { return }
+        body(&subscriptions[idx])
+        save()
     }
 
     func removeSubscription(id: UUID) {
         subscriptions.removeAll { $0.id == id }
+        Keychain.remove(account: KeychainAccount.subscriptionURL(id))
+        DeviceID.clearOverride(for: id)
         save()
     }
 
@@ -146,16 +158,34 @@ final class ServerStore {
 
     private func load() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
-        if let decoded = try? JSONDecoder().decode(Persisted.self, from: data) {
-            subscriptions = decoded.subscriptions
-            settings = decoded.settings ?? AppSettings()
+        guard let decoded = try? JSONDecoder().decode(Persisted.self, from: data) else { return }
+        settings = decoded.settings ?? AppSettings()
+        subscriptions = decoded.subscriptions.map { sub in
+            guard sub.url == nil, sub.hasStoredURL == true else { return sub }
+            var restored = sub
+            restored.url = Keychain.get(account: KeychainAccount.subscriptionURL(sub.id))
+            return restored
         }
     }
 
     func save() {
-        let payload = Persisted(subscriptions: subscriptions, settings: settings)
+        // Subscription URLs are bearer credentials: the Keychain holds them,
+        // `store.json` only records that it did. A build where the Keychain is
+        // unavailable keeps the URL in the (0600) file rather than losing it.
+        let persisted = subscriptions.map { sub -> Subscription in
+            guard let url = sub.url, !url.isEmpty else { return sub }
+            var copy = sub
+            if Keychain.set(url, account: KeychainAccount.subscriptionURL(sub.id)) {
+                copy.url = nil
+                copy.hasStoredURL = true
+            } else {
+                copy.hasStoredURL = false
+            }
+            return copy
+        }
+        let payload = Persisted(subscriptions: persisted, settings: settings)
         if let data = try? JSONEncoder().encode(payload) {
-            try? data.write(to: fileURL)
+            SecureFile.write(data, to: fileURL)
         }
     }
 

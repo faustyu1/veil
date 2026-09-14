@@ -165,7 +165,8 @@ struct AddView: View {
             defer { isLoading = false }
             let hwid = store.settings.sendHwid ? DeviceID.hwid : nil
             do {
-                let result = try await SubscriptionFetcher.fetch(url, hwid: hwid)
+                let result = try await SubscriptionFetcher.fetch(
+                    url, hwid: hwid, userAgent: store.settings.userAgentOverride)
                 guard !result.servers.isEmpty else {
                     errorMessage = loc("The subscription returned no servers.")
                     return
@@ -175,8 +176,8 @@ struct AddView: View {
                     : nameText
                 store.addOrUpdateSubscription(name: name, url: url,
                                               servers: result.servers,
-                                              userinfo: result.userinfo,
-                                              announce: result.announce)
+                                              metadata: result.metadata,
+                                              format: result.payload.format)
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription

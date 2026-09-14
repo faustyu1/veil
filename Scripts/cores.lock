@@ -1,0 +1,18 @@
+# Pinned core binaries: core arch version sha256
+#
+# Every line pins one release asset. The fetch-*.sh scripts refuse to install a
+# download whose SHA-256 does not match the hash recorded here.
+#
+# This file is empty on purpose: the hashes have to be produced on a machine
+# that can reach GitHub's release assets. Record them once, per architecture,
+# and commit the result:
+#
+#     RECORD_HASHES=1 Scripts/fetch-xray.sh
+#     RECORD_HASHES=1 Scripts/fetch-singbox.sh
+#     RECORD_HASHES=1 Scripts/fetch-tun2socks.sh
+#
+# Until a core is listed here the fetch scripts still work, but they print a
+# warning: an unpinned core is exactly the supply-chain hole this file closes.
+sing-box arm64 v1.14.0 a150c94012ff768b7261939cd236b9c8554127f45137230295d23a5660225cc9
+tun2socks arm64 v2.7.0 7c5ebfe2ffb60ecf6e958cc5bbf3e06e74b8b33575ffbb4ba4f6f785a647f1ad
+xray arm64 v26.3.27 2e93a67e8aa1936ecefb307e120830fcbd4c643ab9b1c46a2d0838d5f8409eaf

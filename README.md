@@ -12,6 +12,8 @@ A native macOS VPN client for the [Xray-core](https://github.com/XTLS/Xray-core)
 - **Two tunnel modes**
   - **System Proxy** — sets the macOS SOCKS/HTTP proxy. No admin password. Covers browsers and proxy-aware apps.
   - **TUN (all apps)** — routes *everything* (Telegram, terminal, games, UDP) through [tun2socks](https://github.com/xjasonlyu/tun2socks). A one-time privileged helper install means server switches never ask for a password again.
+- **Privileged helper, not a sudoers rule** — route, DNS and tunnel changes go through a launchd daemon that accepts a fixed set of typed commands from Veil and nothing else. No `NOPASSWD` entry, no root-owned shell scripts, no state in `/tmp`.
+- **Secrets in the Keychain** — subscription URLs (whose path *is* the access token) and device identifiers live in the Keychain; the rest of the state is a `0600` file in a `0700` directory. Nothing sensitive reaches the system log, and **Settings → Privacy → Export diagnostics** produces a report with URLs, tokens and IDs already removed.
 - **Subscriptions** — import subscription URLs; each becomes its own profile group. Reads `Subscription-Userinfo` (traffic & expiry), `Profile-Title` (name) and `Announce` (description) headers. Auto-update on a configurable interval.
 - **QR codes** — show any server as a QR code (copy link or save PNG), and import servers by scanning a QR with the camera or decoding it from an image file.
 - **Professional routing** (v2rayN / Nekoray style)
@@ -117,12 +119,14 @@ Scripts/run-app.sh release
 swift test
 ```
 
-Covers the share-link parsers (VLESS/VMess/Trojan/SS/Hysteria2/TUIC/AnyTLS/WireGuard), the link builder (round-trip), and both the Xray and sing-box config builders.
+Covers the share-link parsers (VLESS/VMess/Trojan/SS/Hysteria2/TUIC/AnyTLS/WireGuard), the link builder (round-trip), both the Xray and sing-box config builders, the subscription format detection and Remnawave header contract, and the redaction and privileged-helper input validation.
+
+The roadmap, and what was corrected in it after reading the code, is in **[docs/PLAN.md](docs/PLAN.md)**.
 
 ## Usage
 
 1. **Add servers** — *Subscription* to import a subscription URL, or *Add Link* to paste `vless://` / `vmess://` / `trojan://` / `ss://` / `hysteria2://` / `tuic://` / `anytls://` / `wireguard://` links (one per line). You can also import from a QR code (image file or camera).
-2. **Pick a mode** — *Proxy* for browsers, *TUN* for everything. The first TUN connection installs a small root-owned helper via a single password prompt.
+2. **Pick a mode** — *Proxy* for browsers, *TUN* for everything. The first TUN connection installs the privileged helper via a single password prompt. Because Veil is ad-hoc signed, the helper pins that exact app binary — reinstall it from *Settings* after updating the app.
 3. **Connect** — click a server to select (and connect/switch). The connect button and menu-bar item act on the remembered server.
 4. **Routing** — *Settings → Routing → Configure…*. Choose a preset or build custom rules. Geo-based presets download the rule database on first use.
 
@@ -138,9 +142,10 @@ SwiftUI app (Veil)
                                     server IP pinned to the physical gateway
 ```
 
-- **No-password TUN** — a one-time install copies the helper scripts to `/usr/local/libexec/veil`-style location and adds a scoped `NOPASSWD` sudoers rule limited to those exact scripts. Subsequent up/down/switch run via `sudo -n`.
+- **Privileged helper** — `Scripts/install-daemon.sh` (run once, from the app, with one admin prompt) installs `VeilHelper` and `tun2socks` into `/Library/Application Support/Veil/helper` and loads a LaunchDaemon. The app then talks to it over XPC with typed commands — start/stop the tunnel, pin server addresses, add probe routes — and the helper validates every value it is given. It accepts connections only from the app binary pinned at install time, and refuses every client if that pin is missing.
+- **Core binaries** — `Scripts/cores.lock` pins the version and SHA-256 of each downloaded core. The fetch scripts abort on a mismatch; record the hashes once per architecture with `RECORD_HASHES=1 Scripts/fetch-xray.sh` (and the other two).
 - **Routing** — `geosite:` matches domains and `geoip:` matches IPs by country, resolved from `geoip.dat` / `geosite.dat` (pointed to via `XRAY_LOCATION_ASSET`).
-- **Storage** — subscriptions and settings persist as JSON in `~/Library/Application Support/`.
+- **Storage** — settings and the node list persist as a `0600` JSON file in `~/Library/Application Support/XrayClient/`. Subscription URLs and device identifiers are kept in the Keychain instead, and the JSON only records that they are there.
 
 ## Project layout
 
@@ -150,12 +155,15 @@ Sources/XrayClient/
   Models/                   ProxyConfig, Subscription, AppSettings, Routing
   Core/                     LinkParser, LinkBuilder, QRCode, SubscriptionFetcher,
                             XrayConfigBuilder, SingBoxConfigBuilder, XrayProcess,
-                            SystemProxy, TunManager, ConnectionManager, ServerStore,
+                            SystemProxy, TunManager, PrivilegedHelper, ConnectionManager,
+                            ServerStore, Keychain, Redaction, SecureFile, Diagnostics,
                             PingTester, GeoAssetManager, SystemIntegration, Localization
   Views/                    ContentView, MenuBarContent, SettingsSheet, RoutingSheet,
                             AddServerSheet, QRDisplaySheet, CameraScannerView
-  Resources/                xray, sing-box, tun2socks (fetched), helper shell scripts
-Scripts/                    fetch-*, run-app.sh, make-icon.sh, tun-*, *-helper.sh
+  Resources/                xray, sing-box, tun2socks (fetched)
+Sources/VeilHelperKit/      XPC protocol + input validation shared with the helper
+Sources/VeilHelper/         the privileged launchd daemon (routes, DNS, tun2socks)
+Scripts/                    fetch-*, cores.lock, run-app.sh, make-icon.sh, *-daemon.sh
 Tests/                      parser, link-builder & config-builder tests
 ```
 

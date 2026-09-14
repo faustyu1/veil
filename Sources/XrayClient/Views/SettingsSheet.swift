@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Basic app settings: tunnel mode, appearance, auto-update, close-to-tray, ports.
 struct SettingsSheet: View {
@@ -7,8 +8,14 @@ struct SettingsSheet: View {
     @Environment(Loc.self) private var loc
     @Environment(\.dismiss) private var dismiss
 
-    @State private var helperInstalled = TunManager.isHelperInstalled
+    // Asking the helper whether it is there is an XPC round trip, so the view
+    // starts pessimistic and refreshes off the main thread.
+    @State private var helperInstalled = false
+    @State private var helperBusy = false
+    @State private var helperError: String?
     @State private var showRouting = false
+    @State private var hwidFingerprint = Redaction.fingerprint(DeviceID.hwid)
+    @State private var diagnosticsCopied = false
 
     var body: some View {
         @Bindable var store = store
@@ -95,19 +102,28 @@ struct SettingsSheet: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if helperInstalled {
+                        if helperBusy {
+                            ProgressView().controlSize(.small)
+                        } else if helperInstalled {
                             Button(loc("Remove")) {
-                                TunManager.uninstallHelper()
-                                helperInstalled = TunManager.isHelperInstalled
+                                runHelperTask { TunManager.uninstallHelper() }
                             }
                             .glassButton().tint(.red)
                         } else {
                             Button(loc("Install")) {
-                                try? TunManager.installHelper()
-                                helperInstalled = TunManager.isHelperInstalled
+                                runHelperTask { try TunManager.installHelper() }
                             }
                             .glassProminentButton()
                         }
+                    }
+                    // An install can fail for reasons the user can act on — a
+                    // cancelled password prompt, an unsigned bundle — so say so
+                    // instead of leaving the button looking inert.
+                    if let helperError {
+                        Text(helperError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                            .textSelection(.enabled)
                     }
                 } header: {
                     Text("TUN Helper (no-password)")
@@ -124,6 +140,48 @@ struct SettingsSheet: View {
                         .onChange(of: store.settings.sendHwid) { _, _ in store.save() }
                     Text(loc("Identifies this device to providers that require it."))
                         .font(.caption).foregroundStyle(.secondary)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(loc("Device ID"))
+                            Text(hwidFingerprint)
+                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(loc("Regenerate")) {
+                            DeviceID.regenerate()
+                            hwidFingerprint = Redaction.fingerprint(DeviceID.hwid)
+                        }
+                        .glassButton()
+                    }
+                    Text(loc("A new ID looks like a new device to your provider and may use up a device slot."))
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    TextField(loc("User-Agent (optional)"),
+                              text: $store.settings.userAgentOverride)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { store.save() }
+                    Text(loc("Leave empty unless your provider's rules expect a particular client."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section(loc("Privacy")) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(loc("Export diagnostics"))
+                            Text(loc("Copies a report with subscription URLs, tokens and IDs removed."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(diagnosticsCopied ? loc("Copied") : loc("Copy")) {
+                            let report = Diagnostics.report(store: store,
+                                                            logText: connection.logs)
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(report, forType: .string)
+                            diagnosticsCopied = true
+                        }
+                        .glassButton()
+                    }
                 }
 
                 Section(loc("Window")) {
@@ -146,6 +204,7 @@ struct SettingsSheet: View {
             .formStyle(.grouped)
         }
         .frame(width: 460, height: 560)
+        .task { await refreshHelperStatus() }
         .sheet(isPresented: $showRouting) { RoutingSheet() }
         .onChange(of: store.settings.socksPort) { _, p in
             connection.ports.socks = p; store.save()
@@ -153,5 +212,29 @@ struct SettingsSheet: View {
         .onChange(of: store.settings.httpPort) { _, p in
             connection.ports.http = p; store.save()
         }
+    }
+
+    /// Runs an install or removal off the main thread — both wait on the admin
+    /// prompt and on an XPC round trip, and neither may freeze the window.
+    private func runHelperTask(_ work: @escaping @Sendable () throws -> Void) {
+        helperBusy = true
+        helperError = nil
+        Task.detached(priority: .userInitiated) {
+            var failure: String?
+            do { try work() } catch { failure = error.localizedDescription }
+            let installed = TunManager.isHelperInstalled
+            await MainActor.run {
+                helperError = failure
+                helperInstalled = installed
+                helperBusy = false
+            }
+        }
+    }
+
+    private func refreshHelperStatus() async {
+        let installed = await Task.detached(priority: .utility) {
+            TunManager.isHelperInstalled
+        }.value
+        helperInstalled = installed
     }
 }

@@ -206,7 +206,7 @@ final class ConnectionManager {
                 fail("could not set system proxy")
             }
         case .tun:
-            // tun2socks keeps running across switches; tun-up.sh fast-path just
+            // tun2socks keeps running across switches; the helper's fast path just
             // re-pins the new server IP(s) (sub-second, no utun re-create).
             // For a balancer group we pin every node so the tunnel never loops.
             Task.detached(priority: .userInitiated) {

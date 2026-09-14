@@ -20,19 +20,19 @@ final class GeoAssetManager {
     private let geositeName = "geosite.dat"
 
     init() {
-        let fm = FileManager.default
         #if os(iOS)
         // Shared app group: the app downloads the .dat files, the tunnel
         // extension is the one that actually reads them.
         let dir = AppGroup.geoDirectory
         #else
+        let fm = FileManager.default
         let base = (try? fm.url(for: .applicationSupportDirectory,
                                 in: .userDomainMask,
                                 appropriateFor: nil,
                                 create: true)) ?? fm.temporaryDirectory
         let dir = base.appendingPathComponent("XrayClient/geo", isDirectory: true)
         #endif
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        SecureFile.ensureDirectory(dir)
         self.directory = dir
         refreshState()
     }
@@ -52,7 +52,11 @@ final class GeoAssetManager {
         lastUpdated = attrs?[.modificationDate] as? Date
     }
 
-    /// Downloads both .dat files from the given source. Throws on failure.
+    /// Downloads both .dat files from the given source.
+    ///
+    /// Both are staged and checked before either is swapped in, and the
+    /// previous pair is kept so a half-applied update can be rolled back —
+    /// routing with one new and one old database is worse than not updating.
     func download(source: GeoAssetSource,
                   customGeoip: String = "",
                   customGeosite: String = "") async {
@@ -64,35 +68,92 @@ final class GeoAssetManager {
         let geoip = source.geoipURL(custom: customGeoip)
         let geosite = source == .custom ? customGeosite
                                         : source.geositeURL(custom: customGeosite)
+        removeStagedLeftovers()
 
         do {
-            try await fetch(urlString: geoip, to: geoipURL)
-            try await fetch(urlString: geosite, to: geositeURL)
+            let stagedGeoip = try await stage(urlString: geoip)
+            let stagedGeosite = try await stage(urlString: geosite)
+            defer {
+                try? FileManager.default.removeItem(at: stagedGeoip)
+                try? FileManager.default.removeItem(at: stagedGeosite)
+            }
+
+            guard SecureFile.replaceKeepingBackup(at: geoipURL, with: stagedGeoip) else {
+                throw AssetError.installFailed(geoip)
+            }
+            guard SecureFile.replaceKeepingBackup(at: geositeURL, with: stagedGeosite) else {
+                SecureFile.rollback(geoipURL)
+                throw AssetError.installFailed(geosite)
+            }
             refreshState()
         } catch {
             lastError = error.localizedDescription
         }
     }
 
-    /// Downloads one file to a temp location then atomically replaces the target.
-    private func fetch(urlString: String, to destination: URL) async throws {
+    /// Clears anything an interrupted update left in the geo directory.
+    private func removeStagedLeftovers() {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: directory,
+                                                      includingPropertiesForKeys: nil) else {
+            return
+        }
+        for file in files where file.lastPathComponent.hasPrefix(".staging-") {
+            try? fm.removeItem(at: file)
+        }
+    }
+
+    /// Downloads one file to a temp location and checks it looks like a rule
+    /// database rather than an error page or a redirect stub.
+    private func stage(urlString: String) async throws -> URL {
         guard let url = URL(string: urlString), url.scheme == "https" else {
             throw AssetError.badURL(urlString)
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 60
         let (tempURL, response) = try await URLSession.shared.download(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+
+        // Move it somewhere we own straight away: URLSession's temporary file
+        // is only guaranteed for the length of this call, and both downloads
+        // have to survive until the pair is swapped in together.
+        let staged = directory.appendingPathComponent(".staging-\(UUID().uuidString)")
+        try? FileManager.default.removeItem(at: staged)
+        do {
+            try FileManager.default.moveItem(at: tempURL, to: staged)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw AssetError.installFailed(urlString)
+        }
+
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            try? FileManager.default.removeItem(at: staged)
             throw AssetError.httpStatus(urlString)
         }
-        let fm = FileManager.default
-        // Sanity check: .dat files are well over 1 KB; reject error pages.
-        let size = (try? fm.attributesOfItem(atPath: tempURL.path)[.size] as? Int) ?? 0
-        if (size ?? 0) < 1024 { throw AssetError.tooSmall(urlString) }
-        if fm.fileExists(atPath: destination.path) {
-            _ = try fm.replaceItemAt(destination, withItemAt: tempURL)
-        } else {
-            try fm.moveItem(at: tempURL, to: destination)
+        do {
+            try validate(staged, source: urlString)
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            throw error
+        }
+        return staged
+    }
+
+    /// A real geoip/geosite database is a multi-megabyte protobuf. Anything
+    /// small, or anything that starts like markup, is a captive portal or an
+    /// error page and must never be installed.
+    private func validate(_ file: URL, source: String) throws {
+        let size = (try? FileManager.default
+            .attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
+        guard (size ?? 0) >= 64 * 1024 else { throw AssetError.tooSmall(source) }
+
+        guard let handle = try? FileHandle(forReadingFrom: file) else {
+            throw AssetError.notADatabase(source)
+        }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: 16)) ?? Data()
+        if head.first == 0x3C {                   // '<' — an HTML error page
+            throw AssetError.notADatabase(source)
         }
     }
 
@@ -100,12 +161,16 @@ final class GeoAssetManager {
         case badURL(String)
         case httpStatus(String)
         case tooSmall(String)
+        case notADatabase(String)
+        case installFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .badURL(let u):    return "Invalid URL: \(u)"
             case .httpStatus(let u): return "Download failed: \(u)"
             case .tooSmall(let u):  return "File too small (not a .dat): \(u)"
+            case .notADatabase(let u): return "Not a rule database: \(u)"
+            case .installFailed(let u): return "Could not install: \(u)"
             }
         }
     }

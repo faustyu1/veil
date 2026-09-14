@@ -13,6 +13,23 @@ struct Subscription: Codable, Identifiable, Equatable {
     var isCollapsed: Bool = false
     var note: String?              // free-form description
 
+    /// True when `url` lives in the Keychain rather than in `store.json`.
+    /// Optional so that stores written by older builds still decode.
+    var hasStoredURL: Bool?
+
+    // Panel metadata (see `SubscriptionMetadata`). All optional: a panel that
+    // says nothing leaves them nil.
+    var supportURL: String?
+    var webPageURL: String?
+    var updateIntervalHours: Int?  // refresh cadence the panel asked for
+    var refillDate: Date?          // when the traffic allowance is topped up
+    var hwidStatus: SubscriptionMetadata.HWIDStatus?
+    var lastFormat: SubscriptionPayload.Format?
+
+    /// Per-subscription overrides. nil means "follow the global setting".
+    var sendHWID: Bool?
+    var userAgentOverride: String?
+
     // Traffic accounting (bytes). nil when the panel doesn't report it.
     var uploadBytes: Int64?
     var downloadBytes: Int64?
@@ -35,13 +52,37 @@ struct Subscription: Codable, Identifiable, Equatable {
         return min(1.0, Double(used) / Double(total))
     }
 
-    var isManual: Bool { url == nil }
+    /// The manual/local group is the one that never had a URL. A subscription
+    /// whose URL is in the Keychain is not manual even while `url` is nil.
+    var isManual: Bool { url == nil && hasStoredURL != true }
+
+    /// Applies what the panel reported in the response headers.
+    mutating func apply(_ metadata: SubscriptionMetadata) {
+        if let info = metadata.userinfo {
+            uploadBytes = info.upload
+            downloadBytes = info.download
+            totalBytes = info.total
+            expiresAt = info.expire
+        }
+        if let announce = metadata.announce { note = announce }
+        if let support = metadata.supportURL { supportURL = support }
+        if let page = metadata.webPageURL { webPageURL = page }
+        if let hours = metadata.updateIntervalHours { updateIntervalHours = hours }
+        if let refill = metadata.refillDate { refillDate = refill }
+        if metadata.hwidStatus != .unknown { hwidStatus = metadata.hwidStatus }
+    }
+
+    /// How long to wait before refreshing, honouring the panel's own request
+    /// when it made one.
+    func refreshInterval(defaultHours: Int) -> TimeInterval {
+        TimeInterval(max(1, updateIntervalHours ?? defaultHours) * 3600)
+    }
 }
 
 /// Parses the `Subscription-Userinfo` response header, e.g.
 /// `upload=1234; download=5678; total=10737418240; expire=1700000000`.
 enum SubscriptionUserinfo {
-    struct Info {
+    struct Info: Equatable {
         var upload: Int64?
         var download: Int64?
         var total: Int64?

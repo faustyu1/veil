@@ -185,7 +185,9 @@ struct SubscriptionSheet: View {
         defer { isLoading = false }
         do {
             let result = try await SubscriptionFetcher.fetch(
-                urlText, hwid: store.settings.sendHwid ? DeviceID.hwid : nil)
+                urlText,
+                hwid: store.settings.sendHwid ? DeviceID.hwid : nil,
+                userAgent: store.settings.userAgentOverride)
             guard !result.servers.isEmpty else {
                 message = "Subscription returned no valid servers."
                 return
@@ -195,8 +197,8 @@ struct SubscriptionSheet: View {
                 : nameText
             store.addOrUpdateSubscription(name: name, url: urlText,
                                           servers: result.servers,
-                                          userinfo: result.userinfo,
-                                          announce: result.announce)
+                                          metadata: result.metadata,
+                                          format: result.payload.format)
             dismiss()
         } catch {
             message = "Error: \(error.localizedDescription)"
