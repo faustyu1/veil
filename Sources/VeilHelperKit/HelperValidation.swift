@@ -57,3 +57,25 @@ public enum HelperValidation {
         Array(sanitizeAddresses(values).prefix(4))
     }
 }
+
+/// The command line the helper starts `tun2socks` with.
+///
+/// It lives here, beside the validation, because getting it wrong is silent:
+/// tun2socks answers an unparseable argument by printing its usage and exiting,
+/// and all the helper sees is an interface that never appeared.
+public enum Tun2socksArguments {
+
+    /// tun2socks 2.7 parses POSIX-style flags, so every long name needs two
+    /// dashes — `-device` is read as the shorthand `-d` with the value
+    /// `evice`, which starts nothing.
+    public static func build(device: String,
+                             socksHost: String,
+                             socksPort: Int,
+                             interface: String) -> [String] {
+        [
+            "--device", device,
+            "--proxy", "socks5://\(socksHost):\(socksPort)",
+            "--interface", interface,
+        ]
+    }
+}

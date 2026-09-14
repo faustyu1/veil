@@ -3,6 +3,24 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] — 2026-09-14
+
+### Fixed
+
+- TUN mode failed to start with `utun123 did not come up`. The bundled
+  tun2socks 2.7 parses POSIX-style flags, so the helper's `-device` was read as
+  the shorthand `-d` with the value `evice`: tun2socks printed its usage and
+  exited without ever creating the interface. The long flags now carry two
+  dashes, and the argument list moved into `VeilHelperKit` with a test that
+  pins the spelling — a flag this binary cannot parse is silent otherwise.
+- The helper no longer waits out the full five seconds when tun2socks has
+  already exited, and it reports the last line tun2socks logged instead of only
+  saying the interface never appeared.
+
+The helper protocol is version 4, so **the helper has to be reinstalled** —
+Settings → TUN Helper → Install. The app refuses to talk to the 1.4.0 helper
+rather than driving a tunnel it knows is broken.
+
 ## [1.4.0] — 2026-09-14
 
 Phase 0 of `docs/PLAN.md`: the security work that had to land before anything
@@ -79,4 +97,5 @@ TUN helper once** — Settings → TUN Helper → Install. The old install put a
   looked like a button that does nothing. Both run off the main thread now, the
   row shows progress, and failures are shown.
 
+[1.4.1]: https://github.com/faustyu1/veil/releases/tag/v1.4.1
 [1.4.0]: https://github.com/faustyu1/veil/releases/tag/v1.4.0

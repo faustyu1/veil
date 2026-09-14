@@ -73,10 +73,11 @@ final class HelperService: NSObject, VeilHelperProtocol, @unchecked Sendable {
         tun2socks = process
         newState.tun2socksPID = process.processIdentifier
 
-        guard waitForInterface() else {
+        guard waitForInterface(process) else {
+            let detail = lastLogLine().map { ": \($0)" } ?? ""
             process.terminate()
             tun2socks = nil
-            return reply("\(device) did not come up")
+            return reply("\(device) did not come up\(detail)")
         }
 
         guard NetworkOps.configureInterface(device, address: tunAddress,
@@ -176,11 +177,10 @@ final class HelperService: NSObject, VeilHelperProtocol, @unchecked Sendable {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = [
-            "-device", device,
-            "-proxy", "socks5://\(socksHost):\(socksPort)",
-            "-interface", interface,
-        ]
+        process.arguments = Tun2socksArguments.build(device: device,
+                                                     socksHost: socksHost,
+                                                     socksPort: socksPort,
+                                                     interface: interface)
         // The log lives next to the helper (root-owned, 0600) rather than in
         // /tmp, where anything could read or pre-create it.
         let logPath = VeilHelperInfo.logPath
@@ -202,12 +202,25 @@ final class HelperService: NSObject, VeilHelperProtocol, @unchecked Sendable {
         }
     }
 
-    private func waitForInterface() -> Bool {
+    private func waitForInterface(_ process: Process) -> Bool {
         for _ in 0..<25 {
             if NetworkOps.interfaceExists(device) { return true }
+            // A tun2socks that rejected its arguments is already gone; waiting
+            // out the full five seconds only delays the error.
+            if !process.isRunning { return false }
             Thread.sleep(forTimeInterval: 0.2)
         }
         return false
+    }
+
+    /// Last non-empty line tun2socks wrote, so a failure to start says why
+    /// instead of only saying that the interface never appeared.
+    private func lastLogLine() -> String? {
+        guard let data = FileManager.default.contents(atPath: VeilHelperInfo.logPath),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        let line = text.split(separator: "\n").last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard let line else { return nil }
+        return String(line.prefix(300))
     }
 
     /// Undoes everything recorded in the state, in the reverse order it was

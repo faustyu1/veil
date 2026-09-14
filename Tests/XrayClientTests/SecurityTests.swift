@@ -153,3 +153,30 @@ final class DeviceIdentifierTests: XCTestCase {
     // real Keychain item the installed app reads, and a test that rotates a
     // user's HWID behind their back is worse than an untested one line.
 }
+
+/// tun2socks answers a flag it cannot parse by printing its usage and exiting,
+/// so a wrong argument never looks like a wrong argument — it looks like a TUN
+/// interface that refused to appear. Pin the spelling.
+final class Tun2socksArgumentTests: XCTestCase {
+
+    func testLongFlagsUseTwoDashes() {
+        let args = Tun2socksArguments.build(device: "utun123",
+                                            socksHost: "127.0.0.1",
+                                            socksPort: 10808,
+                                            interface: "en0")
+        for flag in args where flag.hasPrefix("-") {
+            XCTAssertTrue(flag.hasPrefix("--"),
+                          "\(flag) is parsed as a shorthand cluster, not a long flag")
+        }
+    }
+
+    func testCarriesDeviceProxyAndInterface() {
+        let args = Tun2socksArguments.build(device: "utun123",
+                                            socksHost: "127.0.0.1",
+                                            socksPort: 10808,
+                                            interface: "en0")
+        XCTAssertEqual(args, ["--device", "utun123",
+                              "--proxy", "socks5://127.0.0.1:10808",
+                              "--interface", "en0"])
+    }
+}
