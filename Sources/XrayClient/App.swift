@@ -21,12 +21,7 @@ struct XrayClientApp: App {
                 .environment(\.layoutDirection, loc.isRTL ? .rightToLeft : .leftToRight)
                 .onAppear {
                     loc.language = store.settings.language
-                    connection.mode = store.settings.mode
-                    connection.routingRules = store.settings.effectiveRoutingRules
-                    connection.logLevel = store.settings.logLevel
-                    connection.ports.socks = store.settings.socksPort
-                    connection.ports.http = store.settings.httpPort
-                    connection.notifyOnConnect = store.settings.notifyOnConnect
+                    connection.bind(store)
                     appDelegate.closeToTray = store.settings.closeToTray
                     appDelegate.connection = connection
                     // Keep the login-item registration in sync with the setting.

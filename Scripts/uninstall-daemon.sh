@@ -20,6 +20,11 @@ if /bin/launchctl print "system/${LABEL}" >/dev/null 2>&1; then
   log "unloaded ${LABEL}"
 fi
 
+# The routing core runs as a child of the helper. Unloading the job should take
+# it with it, but a core that outlived its parent would keep owning the default
+# route, so make sure.
+/usr/bin/pkill -f "${INSTALL_DIR}/sing-box" 2>/dev/null || true
+
 # Whatever state was left behind, put the routes back by hand.
 /sbin/route -n delete -net 0.0.0.0/1 >/dev/null 2>&1 || true
 /sbin/route -n delete -net 128.0.0.0/1 >/dev/null 2>&1 || true

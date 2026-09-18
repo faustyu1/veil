@@ -29,7 +29,7 @@ fi
 if [ -z "${APP_BUNDLE}" ] || [ ! -d "${APP_BUNDLE}" ]; then
   log "ERROR: app bundle not provided or missing"; exit 1
 fi
-for f in VeilHelper tun2socks; do
+for f in VeilHelper sing-box; do
   [ -f "${PAYLOAD_DIR}/${f}" ] || { log "ERROR: missing ${f} in payload"; exit 1; }
 done
 
@@ -64,7 +64,17 @@ fi
 /bin/chmod 0755 "/Library/Application Support/Veil" "${INSTALL_DIR}"
 
 /usr/bin/install -m 0755 -o root -g wheel "${PAYLOAD_DIR}/VeilHelper" "${INSTALL_DIR}/VeilHelper"
-/usr/bin/install -m 0755 -o root -g wheel "${PAYLOAD_DIR}/tun2socks" "${INSTALL_DIR}/tun2socks"
+# The routing core the helper runs as root for the native TUN inbound.
+/usr/bin/install -m 0755 -o root -g wheel "${PAYLOAD_DIR}/sing-box" "${INSTALL_DIR}/sing-box"
+# tun2socks stays as the fallback transport for anyone who turns the native
+# inbound off; it is optional, so a payload without it still installs.
+if [ -f "${PAYLOAD_DIR}/tun2socks" ]; then
+  /usr/bin/install -m 0755 -o root -g wheel "${PAYLOAD_DIR}/tun2socks" "${INSTALL_DIR}/tun2socks"
+fi
+# Working directory for the core's cache and downloaded rule-sets.
+/bin/mkdir -p "${INSTALL_DIR}/core"
+/usr/sbin/chown root:wheel "${INSTALL_DIR}/core"
+/bin/chmod 0700 "${INSTALL_DIR}/core"
 /usr/bin/xattr -dr com.apple.quarantine "${INSTALL_DIR}" 2>/dev/null || true
 
 # World-readable but root-only writable: the helper refuses to start if anyone

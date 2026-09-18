@@ -39,6 +39,12 @@ cp "${BIN_PATH}/VeilHelper" "${HELPER_DIR}/VeilHelper"
 if [ -f "${ROOT}/Sources/XrayClient/Resources/tun2socks" ]; then
   cp "${ROOT}/Sources/XrayClient/Resources/tun2socks" "${HELPER_DIR}/tun2socks"
 fi
+# The routing core runs as root when the native TUN inbound is used, so the
+# helper gets its own copy: root must not execute a binary inside a bundle the
+# user can write to.
+if [ -f "${ROOT}/Sources/XrayClient/Resources/sing-box" ]; then
+  cp "${ROOT}/Sources/XrayClient/Resources/sing-box" "${HELPER_DIR}/sing-box"
+fi
 cp "${ROOT}/Scripts/install-daemon.sh" "${HELPER_DIR}/install-daemon.sh"
 cp "${ROOT}/Scripts/uninstall-daemon.sh" "${HELPER_DIR}/uninstall-daemon.sh"
 chmod +x "${HELPER_DIR}"/* 2>/dev/null || true

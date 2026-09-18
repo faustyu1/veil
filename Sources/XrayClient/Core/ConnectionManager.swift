@@ -47,11 +47,30 @@ final class ConnectionManager {
     /// Auto-reconnect when the link silently dies (NAT/firewall idle timeout).
     var autoReconnect: Bool = true
 
+    /// Everything the profile builder needs that lives in the store. Kept in
+    /// sync by `applyStore`, because a profile is no longer built from one
+    /// server — it is built from the whole list, the groups and the rules.
+    var settings = AppSettings()
+    var allServers: [ProxyConfig] = []
+
+    /// The store this connection reads its profile from. Held weakly and
+    /// re-read on every connect, so a rule edited in a sheet takes effect on
+    /// the next switch without every call site having to remember to push it.
+    private weak var store: ServerStore?
+
     /// Post a macOS notification on connect / disconnect / reconnect events.
     var notifyOnConnect: Bool = false
 
     private let xray = XrayProcess()
+    private let bridges = BridgeManager()
     private var activeMode: TunnelMode = .systemProxy
+    /// True when the active connection is a full profile rather than the
+    /// single-server + tun2socks path, so teardown knows what to undo.
+    private var activeUsedProfile = false
+    /// Token the local control API is protected with. Random per launch: it is
+    /// never persisted, and nothing outside this process needs it to survive a
+    /// restart.
+    private let controlSecret = UUID().uuidString
     private var uptimeTimer: Timer?
 
     /// Network path monitoring and recovery after sleep / network changes.
@@ -98,6 +117,36 @@ final class ConnectionManager {
     /// xray and re-pinning the route — the transport (TUN/proxy) stays up, so a
     /// switch is sub-second and never re-prompts for a password.
     func connect(to server: ProxyConfig, forceTransportRefresh: Bool = false) {
+        if let store { applyStore(store) }
+        if settings.useNativeTun {
+            connectWithProfile(to: server, forceTransportRefresh: forceTransportRefresh)
+        } else {
+            connectLegacy(to: server, forceTransportRefresh: forceTransportRefresh)
+        }
+    }
+
+    /// Binds the store and takes a first copy of its settings.
+    func bind(_ store: ServerStore) {
+        self.store = store
+        applyStore(store)
+    }
+
+    /// Copies the parts of the store the connection needs. Called on every
+    /// connect, so a rule edited in a sheet applies on the next switch.
+    func applyStore(_ store: ServerStore) {
+        settings = store.settings
+        allServers = store.allServers
+        mode = store.settings.mode
+        logLevel = store.settings.logLevel
+        ports.socks = store.settings.socksPort
+        ports.http = store.settings.httpPort
+        routingRules = store.settings.effectiveRoutingRules
+        notifyOnConnect = store.settings.notifyOnConnect
+    }
+
+    /// The single-server path: one core, one outbound, tun2socks in front when
+    /// the mode is TUN. Kept for anyone who turns the native inbound off.
+    private func connectLegacy(to server: ProxyConfig, forceTransportRefresh: Bool = false) {
         let wasConnected = (state == .connected || state == .connecting)
         let keepTransport = wasConnected && (activeMode == mode) && !forceTransportRefresh
 
@@ -106,6 +155,7 @@ final class ConnectionManager {
             // Mode actually changed → full teardown.
             teardownTransport()
         }
+        activeUsedProfile = false
         xray.stop()
 
         guard let binary = CoreBinary.locate(for: server.engine) else {
@@ -170,6 +220,143 @@ final class ConnectionManager {
                                       serverHosts: serverHosts,
                                       serverID: server.id,
                                       keepTransport: keepTransport)
+            }
+        }
+    }
+
+    // MARK: - Profile path (sing-box owns the routing)
+
+    /// Builds the whole profile and runs it.
+    ///
+    /// In TUN mode the helper runs the core as root so it can own the
+    /// interface — that is the only arrangement in which a `process_name` rule
+    /// can match, because tun2socks would have thrown the PID away before the
+    /// core ever saw the connection. In system-proxy mode the same profile runs
+    /// as the user behind the local SOCKS/HTTP inbounds.
+    private func connectWithProfile(to server: ProxyConfig, forceTransportRefresh: Bool) {
+        let wasConnected = (state == .connected || state == .connecting)
+        let keepTransport = wasConnected && activeMode == mode
+            && activeUsedProfile && !forceTransportRefresh
+
+        activeServer = server
+        if wasConnected && !keepTransport { teardownTransport() }
+
+        state = .connecting
+        if !isReconnecting { logs = "" }
+        activeServerName = server.name
+        appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title), sing-box)\n")
+
+        let data: Data
+        do {
+            data = try renderProfile(for: server)
+        } catch {
+            fail(error.localizedDescription)
+            return
+        }
+
+        switch mode {
+        case .tun:
+            startProfileInHelper(data, serverID: server.id, reusing: keepTransport)
+        case .systemProxy:
+            startProfileLocally(data, serverID: server.id, reusing: keepTransport)
+        }
+    }
+
+    /// Renders the configuration for `server`, starting whatever bridge
+    /// processes the profile turns out to need.
+    private func renderProfile(for server: ProxyConfig) throws -> Data {
+        var input = ProfileAssembler.Input()
+        input.servers = allServers.contains { $0.id == server.id } ? allServers : allServers + [server]
+        input.settings = settings
+        input.activeServerID = server.id
+        input.ports = ports
+        input.includeTun = (mode == .tun)
+        input.clashSecret = controlSecret
+        // In TUN mode the helper picks the cache path itself — it will not open
+        // a filename this side chose.
+        input.cacheFilePath = mode == .tun ? "" : ProfileAssembler.userCachePath
+
+        let needBridges = ProfileAssembler.bridgedServers(input)
+        if !needBridges.isEmpty {
+            appendLog("[info] \(needBridges.count) node(s) need the Xray bridge\n")
+        }
+        bridges.onLog = { [weak self] line in self?.appendLog(line) }
+        input.bridgePorts = bridges.sync(servers: needBridges,
+                                         basePort: ports.socks + 1000,
+                                         logLevel: settings.logLevel.rawValue)
+        return try SingBoxProfileBuilder.jsonData(ProfileAssembler.profile(input))
+    }
+
+    /// TUN mode: hand the profile to the privileged helper.
+    private func startProfileInHelper(_ data: Data, serverID: UUID, reusing: Bool) {
+        Task.detached(priority: .userInitiated) {
+            do {
+                if reusing {
+                    try TunManager.reloadNativeCore(config: data)
+                } else {
+                    try TunManager.startNativeCore(config: data)
+                }
+                await MainActor.run {
+                    guard self.state == .connecting else { return }
+                    self.activeUsedProfile = true
+                    self.finishConnect(serverID: serverID, mode: .tun)
+                    self.appendLog("[info] tunnel up (sing-box owns the interface)\n")
+                }
+            } catch {
+                let tail = TunManager.nativeCoreStatus.log
+                await MainActor.run {
+                    self.bridges.stopAll()
+                    if let tail, !tail.isEmpty { self.appendLog("[core] \(tail)\n") }
+                    self.fail(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// System-proxy mode: run the same profile as the user and point the
+    /// system's proxy settings at its inbounds.
+    private func startProfileLocally(_ data: Data, serverID: UUID, reusing: Bool) {
+        guard let binary = CoreBinary.locate(for: .singbox) else {
+            fail("sing-box binary not found. Run Scripts/fetch-singbox.sh")
+            return
+        }
+        xray.stop()
+        do {
+            try xray.start(configData: data, binary: binary)
+        } catch {
+            fail(error.localizedDescription)
+            return
+        }
+        activeUsedProfile = true
+
+        let socksHost = ports.listen
+        let socksPort = ports.socks
+        Task.detached(priority: .userInitiated) {
+            let ready = await ConnectionManager.waitForPort(host: socksHost,
+                                                            port: socksPort,
+                                                            timeout: 3.0)
+            await MainActor.run {
+                guard self.state == .connecting else { return }
+                guard self.xray.isRunning else { return }   // onExit reports why
+                guard ready else {
+                    self.xray.stop()
+                    self.bridges.stopAll()
+                    self.fail("the core did not start listening")
+                    return
+                }
+                if reusing {
+                    self.finishConnect(serverID: serverID, mode: .systemProxy)
+                    return
+                }
+                if SystemProxy.enable(socksPort: self.ports.socks,
+                                      httpPort: self.ports.http) {
+                    self.finishConnect(serverID: serverID, mode: .systemProxy)
+                    self.appendLog("[info] system proxy enabled\n")
+                } else {
+                    self.xray.stop()
+                    self.bridges.stopAll()
+                    self.fail("could not set system proxy")
+                }
             }
         }
     }
@@ -251,6 +438,7 @@ final class ConnectionManager {
         activeServer = nil
         teardownTransport()
         xray.stop()
+        activeUsedProfile = false
         activeServerID = nil
         state = .disconnected
         stopUptime()
@@ -262,9 +450,18 @@ final class ConnectionManager {
 
     private func teardownTransport() {
         switch activeMode {
-        case .systemProxy: SystemProxy.disable()
-        case .tun:         TunManager.down()
+        case .systemProxy:
+            SystemProxy.disable()
+        case .tun:
+            // The two TUN transports own the interface in different ways, so
+            // undoing the wrong one would leave the machine without a route.
+            if activeUsedProfile {
+                TunManager.stopNativeCore()
+            } else {
+                TunManager.down()
+            }
         }
+        bridges.stopAll()
     }
 
     private func fail(_ message: String) {
@@ -437,8 +634,11 @@ final class ConnectionManager {
         guard autoReconnect, activeServer != nil else { return }
         guard state != .connecting else { return }
 
-        // Core died while we were asleep/offline: do a full reconnect.
-        if !xray.isRunning {
+        // Core died while we were asleep/offline: do a full reconnect. Which
+        // process to ask about depends on who is running the core — in TUN mode
+        // with the native inbound it belongs to the helper, and `xray` here is
+        // idle by design.
+        if !coreIsRunning {
             appendLog("[warn] core not running after \(reason) — reconnecting\n")
             reconnect(forceTransportRefresh: forceTransportRefresh)
             return
@@ -466,10 +666,25 @@ final class ConnectionManager {
         }
     }
 
+    /// Whether the core carrying the active connection is alive.
+    private var coreIsRunning: Bool {
+        if activeUsedProfile && activeMode == .tun {
+            return TunManager.nativeCoreStatus.running
+        }
+        return xray.isRunning
+    }
+
     private func refreshTransport(reason: String) {
         guard let server = activeServer else { return }
         let listen = ports.listen
         let socks = ports.socks
+        // The native core installs its own routes and re-detects the interface
+        // itself; re-pinning is a tun2socks concern and there is nothing to
+        // re-apply here.
+        if activeUsedProfile && activeMode == .tun {
+            appendLog("[info] core keeps its own routes after \(reason)\n")
+            return
+        }
         switch activeMode {
         case .systemProxy:
             let ok = SystemProxy.enable(socksPort: socks, httpPort: ports.http)
