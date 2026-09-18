@@ -49,7 +49,12 @@ jobs:
 
       - name: Build & test
         run: |
-          swift build -c release
+          # Swift 6.3.x on the macos-26 runner has a whole-module-optimization
+          # regression that makes the release build of this module take ~25 min
+          # (the same code compiles in ~25s on Swift 6.4). Disabling WMO drops
+          # the build back to a couple of minutes at the cost of some
+          # cross-module inlining. Remove once the runner ships Swift >= 6.4.
+          swift build -c release -Xswiftc -no-whole-module-optimization
           swift test
 
       - name: Package Veil.app
