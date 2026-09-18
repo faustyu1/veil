@@ -3,6 +3,31 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Rules can name a server or a group, not just "the proxy", so two applications
+  can leave the machine through two different servers at once.
+- Application rules: pick the app from a searchable list of what is installed
+  and what is running. The list shows the executable name, which is what the
+  core matches and rarely what is on the icon.
+- Server groups — manual, or fastest-wins — that a rule can point at.
+- A DNS editor: typed resolvers, per-resolver detours, DNS rules and FakeIP.
+- A local control API on 127.0.0.1, off by default, for configuring Veil from
+  outside it: rules, groups, resolver, preset, connect. Settings hands over a
+  briefing to paste into an assistant.
+- Settings for the native TUN inbound: strict route and the network stack.
+
+### Changed
+
+- sing-box owns the TUN interface, which is what makes application matching
+  possible. tun2socks remains as a fallback.
+- Your own rules now apply under every preset instead of only "Custom". They
+  run after the LAN bypass and before the preset's country rules.
+- `geosite:` and `geoip:` entries are no longer dropped from sing-box configs;
+  they become rule-sets, which is what sing-box has wanted since 1.12.
+
 ## [1.4.1] — 2026-09-14
 
 ### Fixed
