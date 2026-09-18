@@ -67,10 +67,6 @@ extension Loc {
             "ru": "Подписка", "zh": "订阅", "es": "Suscripción", "hi": "सदस्यता",
             "ar": "اشتراك", "fr": "Abonnement", "pt": "Assinatura", "de": "Abonnement",
             "ja": "サブスク", "id": "Langganan", "tr": "Abonelik"],
-        "Add Link": [
-            "ru": "Добавить ссылку", "zh": "添加链接", "es": "Añadir enlace", "hi": "लिंक जोड़ें",
-            "ar": "إضافة رابط", "fr": "Ajouter un lien", "pt": "Adicionar link", "de": "Link hinzufügen",
-            "ja": "リンク追加", "id": "Tambah tautan", "tr": "Bağlantı ekle"],
         "Refresh": [
             "ru": "Обновить", "zh": "刷新", "es": "Actualizar", "hi": "ताज़ा करें",
             "ar": "تحديث", "fr": "Actualiser", "pt": "Atualizar", "de": "Aktualisieren",
@@ -119,16 +115,21 @@ extension Loc {
             "ja": "サブスクを追加するかリンクを貼り付けて開始します。",
             "id": "Tambahkan langganan atau tempel tautan untuk memulai.",
             "tr": "Başlamak için abonelik ekleyin veya bağlantı yapıştırın."],
-        "Add Subscription": [
-            "ru": "Добавить подписку", "zh": "添加订阅", "es": "Añadir suscripción",
-            "hi": "सदस्यता जोड़ें", "ar": "إضافة اشتراك", "fr": "Ajouter un abonnement",
-            "pt": "Adicionar assinatura", "de": "Abonnement hinzufügen", "ja": "サブスク追加",
-            "id": "Tambah langganan", "tr": "Abonelik ekle"],
-        "Paste Link": [
-            "ru": "Вставить ссылку", "zh": "粘贴链接", "es": "Pegar enlace",
-            "hi": "लिंक पेस्ट करें", "ar": "لصق الرابط", "fr": "Coller le lien",
-            "pt": "Colar link", "de": "Link einfügen", "ja": "リンクを貼付",
-            "id": "Tempel tautan", "tr": "Bağlantı yapıştır"],
+        // MARK: Add sheet
+        // The value is the same in every language: it is a list of URL schemes,
+        // and an example of what the box accepts rather than prose.
+        "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub": [
+            "ru": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "zh": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "es": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "hi": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "ar": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "fr": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "pt": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "de": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "ja": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "id": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub",
+            "tr": "vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub"],
 
         // MARK: Server group menu
         "Test ping": [

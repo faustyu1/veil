@@ -21,6 +21,10 @@ All notable changes to Veil are recorded here. Versions follow
 
 ### Changed
 
+- The separate Subscription and Add Link buttons are now one Add button. It
+  accepts a subscription URL, share links, a base64 subscription body, a
+  wg-quick profile or a QR code, says what it detected while you type, and
+  adds or fetches accordingly.
 - sing-box owns the TUN interface, which is what makes application matching
   possible. tun2socks remains as a fallback.
 - Your own rules now apply under every preset instead of only "Custom". They

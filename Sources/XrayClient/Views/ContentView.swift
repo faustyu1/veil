@@ -7,7 +7,6 @@ struct ContentView: View {
     @Environment(Loc.self) private var loc
 
     @State private var showAddSheet = false
-    @State private var showSubSheet = false
     @State private var showSettings = false
     @State private var showLog = false
     @State private var isRefreshing = false
@@ -102,7 +101,6 @@ struct ContentView: View {
             footer
         }
         .sheet(isPresented: $showAddSheet) { AddServerSheet() }
-        .sheet(isPresented: $showSubSheet) { SubscriptionSheet() }
         .sheet(isPresented: $showSettings) { SettingsSheet() }
     }
 
@@ -237,12 +235,9 @@ struct ContentView: View {
             Text(loc("No servers yet")).font(.headline)
             Text(loc("Add a subscription or paste a link to get started."))
                 .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button(loc("Add Subscription")) { showSubSheet = true }
-                    .glassButton()
-                Button(loc("Paste Link")) { showAddSheet = true }
-                    .glassProminentButton()
-            }.padding(.top, 4)
+            Button(loc("Add")) { showAddSheet = true }
+                .glassProminentButton()
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
     }
@@ -257,12 +252,8 @@ struct ContentView: View {
         VStack(spacing: 0) {
             if selectionMode { deletionBar }
             HStack(spacing: 12) {
-                Button { showSubSheet = true } label: {
-                    Label(loc("Subscription"), systemImage: "arrow.down.circle")
-                }
-                .glassButton()
                 Button { showAddSheet = true } label: {
-                    Label(loc("Add Link"), systemImage: "plus")
+                    Label(loc("Add"), systemImage: "plus")
                 }
                 .glassButton()
                 Button {
