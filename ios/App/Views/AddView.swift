@@ -125,7 +125,7 @@ struct AddView: View {
                   systemImage: "arrow.down.circle")
                 .foregroundStyle(.green)
         case .unrecognized where text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
-            Text("vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub")
+            Text(loc("vless:// · vmess:// · trojan:// · ss:// · wireguard:// · https://…/sub"))
         case .unrecognized:
             Label(loc("Not a link or subscription URL"), systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange)

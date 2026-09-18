@@ -3,6 +3,15 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The separate Subscription and Add Link buttons are now one Add button. It
+  accepts a subscription URL, share links, a base64 subscription body, a
+  wg-quick profile or a QR code, says what it detected while you type, and
+  adds or fetches accordingly.
+
 ## [1.4.1] — 2026-09-14
 
 ### Fixed
