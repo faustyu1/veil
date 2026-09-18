@@ -3,6 +3,7 @@ import AppKit
 
 /// Shows a server's share link as a QR code, with copy + save actions.
 struct QRDisplaySheet: View {
+    @Environment(Loc.self) private var loc
     @Environment(\.dismiss) private var dismiss
     let server: ProxyConfig
 
@@ -20,7 +21,7 @@ struct QRDisplaySheet: View {
                     .background(Color.white)
                     .cornerRadius(8)
             } else {
-                Text("Could not render QR code.")
+                Text(loc("Could not render QR code."))
                     .foregroundStyle(.secondary)
                     .frame(width: 240, height: 240)
             }
@@ -33,13 +34,13 @@ struct QRDisplaySheet: View {
                 .frame(maxWidth: 280)
 
             HStack {
-                Button("Copy link") {
+                Button(loc("Copy link")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(link, forType: .string)
                 }
-                Button("Save PNG…") { savePNG() }
+                Button(loc("Save PNG…")) { savePNG() }
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button(loc("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
             }
             .frame(maxWidth: 280)
         }

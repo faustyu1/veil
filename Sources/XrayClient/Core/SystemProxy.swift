@@ -10,9 +10,39 @@ import Foundation
 /// point at the local Xray inbounds, and restores them on disconnect.
 enum SystemProxy {
 
+    /// The last answer from `resolvePrimaryService`, with the time it was
+    /// taken. Resolving costs three subprocesses, and connecting asks for it
+    /// twice in a row (enable, then disable on the way out), so a short-lived
+    /// cache takes that off the connect path.
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cachedService: (name: String, at: Date)?
+    private static let cacheTTL: TimeInterval = 15
+
+    /// Forgets the cached service. Called when the network path changes, since
+    /// the default route may now run over a different interface.
+    static func invalidateServiceCache() {
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        cachedService = nil
+    }
+
     /// Returns the name of the network service that currently carries the
     /// default route (i.e. the interface actually used for internet access).
     static func primaryService() -> String? {
+        cacheLock.lock()
+        if let cached = cachedService, Date().timeIntervalSince(cached.at) < cacheTTL {
+            cacheLock.unlock()
+            return cached.name
+        }
+        cacheLock.unlock()
+
+        let resolved = resolvePrimaryService()
+        cacheLock.lock()
+        cachedService = resolved.map { ($0, Date()) }
+        cacheLock.unlock()
+        return resolved
+    }
+
+    private static func resolvePrimaryService() -> String? {
         // 1. Find the interface backing the default route, e.g. "en0".
         guard let iface = defaultRouteInterface() else {
             return firstActiveService()

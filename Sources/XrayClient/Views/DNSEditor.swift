@@ -73,77 +73,100 @@ struct DNSEditor: View {
 
     // MARK: - Servers
 
+    /// One section per resolver.
+    ///
+    /// Each field is a `LabeledContent` row rather than a `TextField` with a
+    /// title: a titled field inside a grouped Form has the label lifted into
+    /// the row and the value pushed to the far edge, which is how the name and
+    /// the path ended up reading as two separate things.
+    @ViewBuilder
     private var serversSection: some View {
-        Section {
-            ForEach($dns.servers) { $server in
-                serverCard($server)
+        ForEach($dns.servers) { $server in
+            Section {
+                serverRows($server)
+            } header: {
+                serverHeader($server)
             }
+        }
+        Section {
             Button {
                 dns.servers.append(DNSServerEntry(tag: uniqueTag(), kind: .https,
                                                   server: "", path: "/dns-query"))
                 onChange()
             } label: {
-                Label(loc("Add resolver"), systemImage: "plus.circle")
+                Label(loc("Add resolver"), systemImage: "plus")
             }
-        } header: {
-            Text(loc("Servers"))
+            .buttonStyle(.borderless)
         }
     }
 
-    private func serverCard(_ server: Binding<DNSServerEntry>) -> some View {
+    private func serverHeader(_ server: Binding<DNSServerEntry>) -> some View {
         let id = server.wrappedValue.id
+        let isBuiltin = DNSEditor.builtinTags.contains(server.wrappedValue.tag)
+        return HStack(spacing: 6) {
+            Image(systemName: "globe").foregroundStyle(.secondary)
+            Text(server.wrappedValue.tag.isEmpty
+                 ? loc("Resolver") : server.wrappedValue.tag)
+            Spacer()
+            if !isBuiltin {
+                Button(role: .destructive) {
+                    dns.servers.removeAll { $0.id == id }
+                    onChange()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help(loc("Remove"))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func serverRows(_ server: Binding<DNSServerEntry>) -> some View {
         let kind = server.wrappedValue.kind
         let isBuiltin = DNSEditor.builtinTags.contains(server.wrappedValue.tag)
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                TextField(loc("Name"), text: server.tag)
+
+        LabeledContent(loc("Name")) {
+            TextField("", text: server.tag)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 200)
+                // Renaming a built-in would orphan the rules and the bootstrap
+                // lookup that name it.
+                .disabled(isBuiltin)
+                .onChange(of: server.wrappedValue.tag) { _, _ in onChange() }
+        }
+
+        Picker(loc("Protocol"), selection: server.kind) {
+            ForEach(DNSServerEntry.Kind.allCases) { k in
+                Text(loc(k.title)).tag(k)
+            }
+        }
+        .onChange(of: server.wrappedValue.kind) { _, _ in onChange() }
+
+        if kind.needsServer {
+            LabeledContent(loc("Host or IP")) {
+                TextField("1.1.1.1", text: server.server)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 130)
-                    // Renaming a built-in would orphan the rules and the
-                    // bootstrap lookup that name it.
-                    .disabled(isBuiltin)
-                    .onChange(of: server.wrappedValue.tag) { _, _ in onChange() }
-                Picker("", selection: server.kind) {
-                    ForEach(DNSServerEntry.Kind.allCases) { k in
-                        Text(loc(k.title)).tag(k)
-                    }
-                }
-                .labelsHidden().fixedSize()
-                .onChange(of: server.wrappedValue.kind) { _, _ in onChange() }
-                if !isBuiltin {
-                    Spacer()
-                    Button(role: .destructive) {
-                        dns.servers.removeAll { $0.id == id }
-                        onChange()
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                }
+                    .font(.system(.body, design: .monospaced))
+                    .frame(maxWidth: 240)
+                    .onChange(of: server.wrappedValue.server) { _, _ in onChange() }
             }
-            if kind.needsServer {
-                HStack(spacing: 8) {
-                    TextField(loc("Host or IP"), text: server.server)
+            if kind.needsPath {
+                LabeledContent(loc("Path")) {
+                    TextField("/dns-query", text: server.path)
                         .textFieldStyle(.roundedBorder)
-                        .font(.system(.caption, design: .monospaced))
-                        .onChange(of: server.wrappedValue.server) { _, _ in onChange() }
-                    if kind.needsPath {
-                        TextField("/dns-query", text: server.path)
-                            .textFieldStyle(.roundedBorder).frame(width: 110)
-                            .font(.system(.caption, design: .monospaced))
-                            .onChange(of: server.wrappedValue.path) { _, _ in onChange() }
-                    }
-                }
-            }
-            if kind != .fakeip && kind != .local {
-                HStack {
-                    Text(loc("Queries go through")).font(.caption2)
-                        .foregroundStyle(.secondary)
-                    detourPicker(server.detour)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: 160)
+                        .onChange(of: server.wrappedValue.path) { _, _ in onChange() }
                 }
             }
         }
-        .padding(.vertical, 4)
+
+        if kind != .fakeip && kind != .local {
+            LabeledContent(loc("Queries go through")) {
+                detourPicker(server.detour)
+            }
+        }
     }
 
     /// Outbound a resolver's own queries take. Any outbound in the graph is
@@ -185,79 +208,93 @@ struct DNSEditor: View {
 
     // MARK: - Rules
 
+    @ViewBuilder
     private var rulesSection: some View {
         Section {
-            ForEach($dns.rules) { $rule in
-                ruleCard($rule)
-            }
-            Button {
-                dns.rules.append(DNSRule(name: "", serverTag: dns.servers.first?.tag ?? ""))
-                onChange()
-            } label: {
-                Label(loc("Add DNS rule"), systemImage: "plus.circle")
-            }
+            EmptyView()
         } header: {
             Text(loc("DNS rules — first match wins"))
         } footer: {
             Text(loc("Same matchers as a routing rule, minus the ones that need an address: a name is being resolved, so there is no destination IP yet."))
                 .font(.caption2)
         }
-    }
-
-    private func ruleCard(_ rule: Binding<DNSRule>) -> some View {
-        let id = rule.wrappedValue.id
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Toggle("", isOn: rule.enabled)
-                    .labelsHidden()
-                    .onChange(of: rule.wrappedValue.enabled) { _, _ in onChange() }
-                TextField(loc("Rule name"), text: rule.name)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: rule.wrappedValue.name) { _, _ in onChange() }
-                Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
-                if rule.wrappedValue.reject {
-                    Text(loc("Refused")).font(.caption).foregroundStyle(.secondary)
-                } else {
-                    Picker("", selection: rule.serverTag) {
-                        ForEach(dns.servers) { server in
-                            Text(server.tag).tag(server.tag)
-                        }
-                    }
-                    .labelsHidden().fixedSize()
-                    .onChange(of: rule.wrappedValue.serverTag) { _, _ in onChange() }
-                }
-                Button(role: .destructive) {
-                    dns.rules.removeAll { $0.id == id }
-                    onChange()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(loc("Domains")).font(.caption2).foregroundStyle(.secondary)
-                TokenChips(values: rule.domains,
-                           placeholder: "example.com, geosite:google",
-                           monospaced: true, onChange: onChange)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(loc("Apps")).font(.caption2).foregroundStyle(.secondary)
-                TokenChips(values: rule.processNames,
-                           placeholder: loc("Executable name"),
-                           onChange: onChange)
-            }
-            HStack {
-                Toggle(loc("Refuse these names"), isOn: rule.reject)
-                    .toggleStyle(.checkbox)
-                    .onChange(of: rule.wrappedValue.reject) { _, _ in onChange() }
-                Spacer()
-                Toggle(loc("Invert"), isOn: rule.invert)
-                    .toggleStyle(.checkbox)
-                    .onChange(of: rule.wrappedValue.invert) { _, _ in onChange() }
+        ForEach($dns.rules) { $rule in
+            Section {
+                ruleRows($rule)
+            } header: {
+                ruleHeader($rule)
             }
         }
-        .padding(.vertical, 4)
-        .opacity(rule.wrappedValue.enabled ? 1 : 0.5)
+        Section {
+            Button {
+                dns.rules.append(DNSRule(name: "", serverTag: dns.servers.first?.tag ?? ""))
+                onChange()
+            } label: {
+                Label(loc("Add DNS rule"), systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private func ruleHeader(_ rule: Binding<DNSRule>) -> some View {
+        let id = rule.wrappedValue.id
+        return HStack(spacing: 8) {
+            Toggle("", isOn: rule.enabled)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+                .onChange(of: rule.wrappedValue.enabled) { _, _ in onChange() }
+            Text(rule.wrappedValue.name.isEmpty
+                 ? loc("Rule name") : rule.wrappedValue.name)
+            Spacer()
+            Button(role: .destructive) {
+                dns.rules.removeAll { $0.id == id }
+                onChange()
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help(loc("Remove"))
+        }
+    }
+
+    @ViewBuilder
+    private func ruleRows(_ rule: Binding<DNSRule>) -> some View {
+        LabeledContent(loc("Name")) {
+            TextField("", text: rule.name)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 240)
+                .onChange(of: rule.wrappedValue.name) { _, _ in onChange() }
+        }
+
+        if rule.wrappedValue.reject {
+            LabeledContent(loc("Answer with")) {
+                Text(loc("Refused")).foregroundStyle(.secondary)
+            }
+        } else {
+            Picker(loc("Answer with"), selection: rule.serverTag) {
+                ForEach(dns.servers) { server in
+                    Text(server.tag).tag(server.tag)
+                }
+            }
+            .onChange(of: rule.wrappedValue.serverTag) { _, _ in onChange() }
+        }
+
+        LabeledContent(loc("Domains")) {
+            TokenChips(values: rule.domains,
+                       placeholder: "example.com, geosite:google",
+                       monospaced: true, onChange: onChange)
+        }
+        LabeledContent(loc("Apps")) {
+            TokenChips(values: rule.processNames,
+                       placeholder: loc("Executable name"),
+                       onChange: onChange)
+        }
+
+        Toggle(loc("Refuse these names"), isOn: rule.reject)
+            .onChange(of: rule.wrappedValue.reject) { _, _ in onChange() }
+        Toggle(loc("Invert"), isOn: rule.invert)
+            .onChange(of: rule.wrappedValue.invert) { _, _ in onChange() }
     }
 
     // MARK: - Helpers

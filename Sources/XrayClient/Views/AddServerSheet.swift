@@ -159,16 +159,17 @@ struct AddServerSheet: View {
 
 /// A small sheet wrapping the live camera scanner.
 struct ScannerSheet: View {
+    @Environment(Loc.self) private var loc
     @Environment(\.dismiss) private var dismiss
     var onScan: (String) -> Void
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Point the camera at a QR code").font(.headline)
+            Text(loc("Point the camera at a QR code")).font(.headline)
             CameraScannerView { value in onScan(value) }
                 .frame(width: 360, height: 270)
                 .cornerRadius(10)
-            Button("Cancel") { dismiss() }
+            Button(loc("Cancel")) { dismiss() }
         }
         .padding(16)
         .frame(width: 400)

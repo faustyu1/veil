@@ -1,13 +1,13 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.openWindow) private var openWindow
     @Environment(ServerStore.self) private var store
     @Environment(ConnectionManager.self) private var connection
     @Environment(PingTester.self) private var pinger
     @Environment(Loc.self) private var loc
 
     @State private var showAddSheet = false
-    @State private var showSettings = false
     @State private var showLog = false
     @State private var isRefreshing = false
     @State private var searchText = ""
@@ -101,7 +101,9 @@ struct ContentView: View {
             footer
         }
         .sheet(isPresented: $showAddSheet) { AddServerSheet() }
-        .sheet(isPresented: $showSettings) { SettingsSheet() }
+        // Measure once on the first appearance, so the list carries latencies
+        // without the user having to know a Test Ping button exists.
+        .task { pingAllIfUntested() }
     }
 
     // MARK: - Search & filter
@@ -109,7 +111,7 @@ struct ContentView: View {
     private var searchBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Search servers…", text: $searchText)
+            TextField(loc("Search servers…"), text: $searchText)
                 .textFieldStyle(.plain)
             if !searchText.isEmpty {
                 Button { searchText = "" } label: {
@@ -117,14 +119,30 @@ struct ContentView: View {
                 }.buttonStyle(.plain)
             }
             Divider().frame(height: 16)
-            Toggle("Alive", isOn: $aliveOnly)
+            Toggle(loc("Alive"), isOn: $aliveOnly)
                 .glassToggle().controlSize(.small)
-                .help("Show only servers that responded to the last ping test")
-            Toggle("By ping", isOn: $sortByPing)
+                .help(loc("Show only servers that answered a ping. Turning this on measures them first."))
+                // Without this the filter empties the whole list on a fresh
+                // launch: nothing has been measured yet, so nothing is "alive".
+                .onChange(of: aliveOnly) { _, on in
+                    if on { pingAllIfUntested() }
+                }
+            Toggle(loc("By ping"), isOn: $sortByPing)
                 .glassToggle().controlSize(.small)
-                .help("Sort servers by latency within each group")
+                .help(loc("Sort servers by latency within each group"))
+                .onChange(of: sortByPing) { _, on in
+                    if on { pingAllIfUntested() }
+                }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
+    }
+
+    /// Measures every server, unless a measurement is already there or running.
+    /// Both list filters are meaningless without one, so they ask for it rather
+    /// than showing an empty list and leaving the user to guess why.
+    private func pingAllIfUntested() {
+        guard !pinger.hasResults, !pinger.isBusy else { return }
+        pinger.test(store.allServers, tunActive: tunActive)
     }
 
     // MARK: - Header (status + connect)
@@ -139,16 +157,16 @@ struct ContentView: View {
                     .foregroundStyle(statusColor)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(connection.state.label)
+                Text(statusLabel)
                     .font(.headline)
                     .foregroundStyle(statusColor)
                 if connection.isConnected {
-                    Text("\(connection.activeServerName) · \(connection.uptimeText)")
+                    Text(verbatim: "\(connection.activeServerName) · \(connection.uptimeText)")
                         .font(.subheadline).foregroundStyle(.secondary)
                 } else if let selected {
                     Text(selected.name).font(.subheadline).foregroundStyle(.secondary)
                 } else {
-                    Text("Select a server").font(.subheadline).foregroundStyle(.secondary)
+                    Text(loc("Select a server")).font(.subheadline).foregroundStyle(.secondary)
                 }
             }
             Spacer()
@@ -174,14 +192,14 @@ struct ContentView: View {
     private func connectButton(selected: ProxyConfig?) -> some View {
         if connection.isConnected || connection.state == .connecting {
             Button(role: .destructive) { connection.disconnect() } label: {
-                Label("Disconnect", systemImage: "stop.fill").frame(minWidth: 96)
+                Label(loc("Disconnect"), systemImage: "stop.fill").frame(minWidth: 96)
             }
             .controlSize(.large).glassProminentButton().tint(.red)
         } else {
             Button {
                 if let s = selected { connection.connect(to: s) }
             } label: {
-                Label("Connect", systemImage: "bolt.fill").frame(minWidth: 96)
+                Label(loc("Connect"), systemImage: "bolt.fill").frame(minWidth: 96)
             }
             .controlSize(.large).glassProminentButton()
             .disabled(selected == nil)
@@ -257,7 +275,15 @@ struct ContentView: View {
                 }
                 .glassButton()
                 Button {
-                    Task { isRefreshing = true; await SubscriptionService.refreshAll(store); isRefreshing = false }
+                    Task {
+                        isRefreshing = true
+                        await SubscriptionService.refreshAll(store)
+                        isRefreshing = false
+                        // A refresh can replace every node, so the latencies on
+                        // screen now belong to servers that may be gone.
+                        pinger.clear()
+                        pinger.test(store.allServers, tunActive: tunActive)
+                    }
                 } label: {
                     if isRefreshing { ProgressView().controlSize(.small) }
                     else { Label(loc("Refresh"), systemImage: "arrow.clockwise") }
@@ -287,7 +313,11 @@ struct ContentView: View {
 
                 Toggle(isOn: $showLog) { Label(loc("Log"), systemImage: "text.alignleft") }
                     .glassToggle()
-                Button { showSettings = true } label: {
+                // Settings is a scene now, so this opens the same window ⌘,
+                // does instead of a second, sheet-shaped copy of it.
+                Button {
+                    openWindow(id: WindowID.settings)
+                } label: {
                     Label(loc("Settings"), systemImage: "gearshape")
                 }
                 .glassButton()
@@ -310,7 +340,7 @@ struct ContentView: View {
                 selectedForDeletion = allSelected ? [] : manualIDs
             }
             .glassButton()
-            Text("\(selectedForDeletion.count)")
+            Text(verbatim: "\(selectedForDeletion.count)")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
             Button(role: .destructive) {
@@ -331,6 +361,17 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
         .background(Color.primary.opacity(0.04))
+    }
+
+    /// The connection state, translated. `failed` carries the core's own
+    /// message, which is not ours to translate, so only the label around it is.
+    private var statusLabel: String {
+        switch connection.state {
+        case .disconnected:  return loc("Disconnected")
+        case .connecting:    return loc("Connecting…")
+        case .connected:     return loc("Connected")
+        case .failed(let m): return "\(loc("Failed")): \(m)"
+        }
     }
 
     private var statusColor: Color {
@@ -384,13 +425,23 @@ struct SubscriptionGroupView: View {
                         let isLocked = isActive && connection.isConnected
                         HStack(spacing: 8) {
                             if selectionMode {
-                                Image(systemName: isLocked ? "lock.fill"
-                                      : (selectedForDeletion.wrappedValue.contains(server.id)
-                                         ? "checkmark.circle.fill" : "circle"))
-                                    .foregroundStyle(isLocked ? .secondary
-                                                     : (selectedForDeletion.wrappedValue.contains(server.id)
-                                                        ? Color.accentColor : .secondary))
+                                // A real checkbox, so selection looks and
+                                // behaves the way it does everywhere else on
+                                // the Mac. The active server cannot be picked.
+                                if isLocked {
+                                    Image(systemName: "lock.fill")
+                                        .foregroundStyle(.secondary)
+                                        .help(loc("Connected"))
+                                        .padding(.leading, 14)
+                                } else {
+                                    Toggle("", isOn: Binding(
+                                        get: { selectedForDeletion.wrappedValue.contains(server.id) },
+                                        set: { _ in toggleSelection(server.id) }
+                                    ))
+                                    .toggleStyle(.checkbox)
+                                    .labelsHidden()
                                     .padding(.leading, 14)
+                                }
                             }
                             ServerRow(
                                 server: server,
@@ -454,23 +505,19 @@ struct SubscriptionGroupView: View {
 
     private var groupHeader: some View {
         HStack(spacing: 10) {
-            // Larger chevron hit target with its own background.
-            Button {
-                store.toggleCollapsed(id: subscription.id)
-            } label: {
-                Image(systemName: subscription.isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(Color.secondary.opacity(0.12)))
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
+            // The standard disclosure chevron: no invented affordance, and it
+            // turns rather than swapping glyphs.
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(subscription.isCollapsed ? 0 : 90))
+                .animation(.snappy(duration: 0.18), value: subscription.isCollapsed)
+                .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(subscription.name).font(.headline)
-                    Text("\(subscription.servers.count)")
+                    Text(verbatim: "\(subscription.servers.count)")
                         .font(.caption2).foregroundStyle(.secondary)
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Capsule().fill(Color.secondary.opacity(0.15)))
@@ -485,13 +532,27 @@ struct SubscriptionGroupView: View {
             }
             Spacer()
             Menu {
-                Button("Test ping (group)") { pinger.test(subscription.servers, tunActive: connection.mode == .tun && connection.isConnected) }
+                Button {
+                    pinger.test(subscription.servers,
+                                tunActive: connection.mode == .tun && connection.isConnected)
+                } label: {
+                    Label(loc("Test ping (group)"), systemImage: "bolt.horizontal")
+                }
+                Button {
+                    store.toggleCollapsed(id: subscription.id)
+                } label: {
+                    Label(subscription.isCollapsed ? loc("Expand") : loc("Collapse"),
+                          systemImage: subscription.isCollapsed
+                            ? "chevron.down" : "chevron.right")
+                }
                 if !subscription.isManual {
                     Divider()
-                    Button("Refresh now") {
+                    Button {
                         Task { await SubscriptionService.refresh(subscription, into: store) }
+                    } label: {
+                        Label(loc("Refresh now"), systemImage: "arrow.clockwise")
                     }
-                    Toggle("Auto-update", isOn: Binding(
+                    Toggle(loc("Auto-update"), isOn: Binding(
                         get: { subscription.autoUpdate },
                         set: { store.setAutoUpdate($0, id: subscription.id) }
                     ))
@@ -499,15 +560,20 @@ struct SubscriptionGroupView: View {
                     // Can't remove a subscription that holds the active server.
                     let holdsActive = connection.isConnected
                         && subscription.servers.contains { $0.id == connection.activeServerID }
-                    Button("Remove", role: .destructive) {
+                    Button(role: .destructive) {
                         store.removeSubscription(id: subscription.id)
+                    } label: {
+                        Label(loc("Remove"), systemImage: "trash")
                     }
                     .disabled(holdsActive)
                 }
             } label: {
-                Image(systemName: "ellipsis.circle").font(.system(size: 16))
+                Image(systemName: "ellipsis")
             }
-            .menuStyle(.borderlessButton).fixedSize().frame(width: 28)
+            .menuStyle(.button)
+            .buttonStyle(.accessoryBar)
+            .menuIndicator(.hidden)
+            .fixedSize()
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .contentShape(Rectangle())
@@ -516,12 +582,20 @@ struct SubscriptionGroupView: View {
 
     @ViewBuilder
     private var trafficLine: some View {
-        if let used = subscription.usedBytes, let total = subscription.totalBytes {
+        if let used = subscription.usedBytes {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("\(ByteFormat.string(used)) / \(ByteFormat.string(total))")
+                    // An uncapped plan gets the amount used and nothing else:
+                    // there is no denominator, so there is no ratio to draw.
+                    if subscription.isUnlimitedTraffic || subscription.totalBytes == nil {
+                        Text(verbatim: ByteFormat.string(used))
+                        Text(loc("Unlimited"))
+                            .foregroundStyle(.tertiary)
+                    } else if let total = subscription.totalBytes {
+                        Text(verbatim: "\(ByteFormat.string(used)) / \(ByteFormat.string(total))")
+                    }
                     if let exp = subscription.expiresAt {
-                        Text("· until \(exp.formatted(date: .abbreviated, time: .omitted))")
+                        Text(verbatim: "· \(loc("until")) \(exp.formatted(date: .abbreviated, time: .omitted))")
                     }
                 }
                 .font(.caption2).foregroundStyle(.secondary)
@@ -533,7 +607,7 @@ struct SubscriptionGroupView: View {
                 }
             }
         } else if let exp = subscription.expiresAt {
-            Text("Expires \(exp.formatted(date: .abbreviated, time: .omitted))")
+            Text(verbatim: "\(loc("Expires")) \(exp.formatted(date: .abbreviated, time: .omitted))")
                 .font(.caption2).foregroundStyle(.secondary)
         }
     }
@@ -542,6 +616,7 @@ struct SubscriptionGroupView: View {
 // MARK: - Server row
 
 struct ServerRow: View {
+    @Environment(Loc.self) private var loc
     let server: ProxyConfig
     let isSelected: Bool
     let isActive: Bool
@@ -555,7 +630,7 @@ struct ServerRow: View {
                 .frame(width: 7, height: 7)
             Text(server.name).lineLimit(1)
             if server.isBalancer {
-                Text("\((server.alternates?.count ?? 0) + 1)")
+                Text(verbatim: "\((server.alternates?.count ?? 0) + 1)")
                     .font(.caption2).foregroundStyle(.secondary)
                     .padding(.horizontal, 4).padding(.vertical, 1)
                     .background(Color.secondary.opacity(0.15), in: Capsule())
@@ -579,11 +654,11 @@ struct ServerRow: View {
             ProgressView().controlSize(.mini)
         } else if let outer = latency {
             if let ms = outer {
-                Text("\(ms) ms")
+                Text(verbatim: "\(ms) ms")
                     .font(.caption2).monospacedDigit()
                     .foregroundStyle(latencyColor(ms))
             } else {
-                Text("timeout")
+                Text(loc("timeout"))
                     .font(.caption2).foregroundStyle(.red)
             }
         }
@@ -601,6 +676,7 @@ struct ServerRow: View {
 // MARK: - Compact log pane
 
 struct LogPane: View {
+    @Environment(Loc.self) private var loc
     let text: String
     var onClear: (() -> Void)? = nil
 
@@ -615,9 +691,9 @@ struct LogPane: View {
                 Image(systemName: "terminal")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                Text("Logs")
+                Text(loc("Logs"))
                     .font(.system(size: 12, weight: .semibold))
-                Text("\(lineCount)")
+                Text(verbatim: "\(lineCount)")
                     .font(.system(size: 10, weight: .medium)).monospacedDigit()
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6).padding(.vertical, 1)
@@ -630,7 +706,7 @@ struct LogPane: View {
                     Image(systemName: "doc.on.doc").font(.system(size: 11))
                 }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
-                .help("Copy all logs")
+                .help(loc("Copy all logs"))
                 .disabled(text.isEmpty)
                 Button {
                     onClear?()
@@ -638,7 +714,7 @@ struct LogPane: View {
                     Image(systemName: "trash").font(.system(size: 11))
                 }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
-                .help("Clear logs")
+                .help(loc("Clear logs"))
                 .disabled(text.isEmpty)
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
@@ -649,7 +725,7 @@ struct LogPane: View {
             // Scrollable monospaced body.
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(text.isEmpty ? "No logs yet." : text)
+                    Text(text.isEmpty ? loc("No logs yet.") : text)
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(text.isEmpty ? Color.secondary : .primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -717,6 +793,18 @@ extension View {
             self.buttonStyle(.glassProminent)
         } else {
             self.buttonStyle(.borderedProminent)
+        }
+    }
+
+    /// Keeps the window title on the titlebar line instead of letting it take
+    /// a row of its own above the toolbar, which is what pushed the Settings
+    /// tab switcher onto a second line.
+    @ViewBuilder
+    func inlineWindowTitle() -> some View {
+        if #available(macOS 15.0, *) {
+            self.toolbarTitleDisplayMode(.inline)
+        } else {
+            self
         }
     }
 

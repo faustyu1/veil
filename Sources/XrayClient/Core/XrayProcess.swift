@@ -144,6 +144,14 @@ final class XrayProcess {
         proc.terminationHandler = nil
         proc.terminate()
         process = nil
+        // Wait briefly for the process to actually go away. A core that is
+        // still alive still holds the SOCKS port, and the replacement started
+        // right after would fail to bind — which is what made switching
+        // servers look slow: the first attempt died and the watchdog retried.
+        let deadline = Date().addingTimeInterval(0.5)
+        while proc.isRunning, Date() < deadline {
+            usleep(10_000) // 10ms
+        }
     }
 }
 #endif

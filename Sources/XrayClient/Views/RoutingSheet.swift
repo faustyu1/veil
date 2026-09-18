@@ -14,11 +14,12 @@ struct RoutingSheet: View {
     private var geo = GeoAssetManager.shared
 
     enum Tab: String, CaseIterable, Identifiable {
-        case rules, groups, dns, database
+        case rules, lists, groups, dns, database
         var id: String { rawValue }
         var title: String {
             switch self {
             case .rules:    return "Rules"
+            case .lists:    return "Lists"
             case .groups:   return "Groups"
             case .dns:      return "DNS"
             case .database: return "Database"
@@ -27,6 +28,7 @@ struct RoutingSheet: View {
         var icon: String {
             switch self {
             case .rules:    return "arrow.triangle.branch"
+            case .lists:    return "list.bullet.rectangle"
             case .groups:   return "square.stack.3d.up"
             case .dns:      return "globe"
             case .database: return "externaldrive"
@@ -38,8 +40,6 @@ struct RoutingSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
             content
             if connection.isConnected {
                 Divider()
@@ -51,27 +51,28 @@ struct RoutingSheet: View {
                 .padding(.horizontal).padding(.vertical, 7)
             }
         }
-        .frame(width: 720, height: 680)
-    }
-
-    private var header: some View {
-        HStack {
-            Text(loc("Routing")).font(.title2).bold()
-            Spacer()
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases) { t in
-                    Label(loc(t.title), systemImage: t.icon).tag(t)
+        .frame(minWidth: 680, idealWidth: 820, maxWidth: .infinity,
+               minHeight: 440, idealHeight: 700, maxHeight: .infinity)
+        .windowTitle(loc("Routing"))
+        // A window, so the tab switcher belongs in the real titlebar rather
+        // than in a strip of view that only looks like one.
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases) { t in
+                        Label(loc(t.title), systemImage: t.icon).tag(t)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            Spacer()
-            Button(loc("Done")) { applyAndDismiss() }
-                .keyboardShortcut(.defaultAction)
-                .glassProminentButton()
+            ToolbarItem(placement: .automatic) {
+                Button(loc("Done")) { applyAndDismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .help(loc("Apply the rules and close"))
+            }
         }
-        .padding()
     }
 
     @ViewBuilder
@@ -84,6 +85,10 @@ struct RoutingSheet: View {
                 rulesSection
             }
             .formStyle(.grouped)
+        case .lists:
+            CommunityListsEditor(selected: $store.settings.communityLists,
+                                 target: $store.settings.communityListTarget,
+                                 onChange: { store.save() })
         case .groups:
             ServerGroupsEditor(groups: $store.settings.serverGroups,
                                servers: store.allServers,

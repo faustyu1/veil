@@ -74,6 +74,11 @@ final class AppControlBackend: ControlBackend {
 
     func apps(matching query: String, limit: Int) -> [ControlApp] {
         let catalog = ProcessCatalog.shared
+        // The catalog is normally warmed at launch, but a caller that reaches
+        // /v1/apps first (or after a headless start) must not see an empty list.
+        if catalog.entries.isEmpty {
+            Task { await catalog.reload() }
+        }
         return catalog.search(query).prefix(limit).map { entry in
             ControlApp(name: entry.displayName,
                        processName: entry.executableName,

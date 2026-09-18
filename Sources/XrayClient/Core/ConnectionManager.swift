@@ -85,6 +85,13 @@ final class ConnectionManager {
     /// transparently restart the tunnel without user input.
     private var activeServer: ProxyConfig?
     private var watchdogTask: Task<Void, Never>?
+    /// Core output waiting to be shown, and the task that will show it.
+    private var pendingLog = ""
+    private var logFlushTask: Task<Void, Never>?
+
+    /// When the current connect attempt began, for the "ready in Ns" log line.
+    private var connectStarted: Date?
+
     /// True while a watchdog-driven reconnect is in flight, so the UI doesn't
     /// flicker through .connecting and the uptime clock isn't reset.
     private var isReconnecting = false
@@ -164,8 +171,9 @@ final class ConnectionManager {
             fail("\(missing) binary not found. Run Scripts/\(script)")
             return
         }
+        connectStarted = Date()
         state = .connecting
-        if !isReconnecting { logs = "" }
+        if !isReconnecting { logs = ""; pendingLog = "" }
         activeServerName = server.name
         let coreName = server.engine == .singbox ? "sing-box" : "xray"
         appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title), \(coreName))\n")
@@ -241,8 +249,9 @@ final class ConnectionManager {
         activeServer = server
         if wasConnected && !keepTransport { teardownTransport() }
 
+        connectStarted = Date()
         state = .connecting
-        if !isReconnecting { logs = "" }
+        if !isReconnecting { logs = ""; pendingLog = "" }
         activeServerName = server.name
         appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title), sing-box)\n")
 
@@ -348,14 +357,21 @@ final class ConnectionManager {
                     self.finishConnect(serverID: serverID, mode: .systemProxy)
                     return
                 }
-                if SystemProxy.enable(socksPort: self.ports.socks,
-                                      httpPort: self.ports.http) {
-                    self.finishConnect(serverID: serverID, mode: .systemProxy)
-                    self.appendLog("[info] system proxy enabled\n")
-                } else {
-                    self.xray.stop()
-                    self.bridges.stopAll()
-                    self.fail("could not set system proxy")
+                let socks = self.ports.socks
+                let http = self.ports.http
+                Task.detached(priority: .userInitiated) {
+                    let ok = SystemProxy.enable(socksPort: socks, httpPort: http)
+                    await MainActor.run {
+                        guard self.state == .connecting else { return }
+                        if ok {
+                            self.finishConnect(serverID: serverID, mode: .systemProxy)
+                            self.appendLog("[info] system proxy enabled\n")
+                        } else {
+                            self.xray.stop()
+                            self.bridges.stopAll()
+                            self.fail("could not set system proxy")
+                        }
+                    }
                 }
             }
         }
@@ -365,10 +381,10 @@ final class ConnectionManager {
     private nonisolated static func waitForPort(host: String, port: Int, timeout: TimeInterval) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if await PingTester.tcpLatency(host: host, port: port, timeout: 0.3) != nil {
+            if await PingTester.tcpLatency(host: host, port: port, timeout: 0.25) != nil {
                 return true
             }
-            try? await Task.sleep(nanoseconds: 80_000_000) // 80ms
+            try? await Task.sleep(nanoseconds: 25_000_000) // 25ms
         }
         return false
     }
@@ -384,13 +400,22 @@ final class ConnectionManager {
                 finishConnect(serverID: serverID, mode: mode)
                 return
             }
-            let ok = SystemProxy.enable(socksPort: ports.socks, httpPort: ports.http)
-            if ok {
-                finishConnect(serverID: serverID, mode: mode)
-                appendLog("[info] system proxy enabled\n")
-            } else {
-                xray.stop()
-                fail("could not set system proxy")
+            // Six `networksetup` calls, each one a subprocess: off the main
+            // thread so the window keeps drawing while they run.
+            let socks = ports.socks
+            let http = ports.http
+            Task.detached(priority: .userInitiated) {
+                let ok = SystemProxy.enable(socksPort: socks, httpPort: http)
+                await MainActor.run {
+                    guard self.state == .connecting else { return }
+                    if ok {
+                        self.finishConnect(serverID: serverID, mode: mode)
+                        self.appendLog("[info] system proxy enabled\n")
+                    } else {
+                        self.xray.stop()
+                        self.fail("could not set system proxy")
+                    }
+                }
             }
         case .tun:
             // tun2socks keeps running across switches; the helper's fast path just
@@ -415,6 +440,11 @@ final class ConnectionManager {
     }
 
     private func finishConnect(serverID: UUID, mode: TunnelMode) {
+        if let started = connectStarted {
+            appendLog(String(format: "[info] ready in %.1fs\n",
+                             Date().timeIntervalSince(started)))
+            connectStarted = nil
+        }
         let wasReconnecting = isReconnecting
         activeServerID = serverID
         activeMode = mode
@@ -562,6 +592,9 @@ final class ConnectionManager {
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             let satisfied = (path.status == .satisfied)
+            // The default route may now run over a different interface, so the
+            // cached network-service name is no longer trustworthy.
+            SystemProxy.invalidateServiceCache()
             Task { @MainActor in
                 self?.handleNetworkChange(satisfied: satisfied)
             }
@@ -718,7 +751,29 @@ final class ConnectionManager {
     /// the tunnel — the bridges, the control API — reports through here, so
     /// there is one place to look when something misbehaves.
     func appendLog(_ text: String) {
-        logs += text
+        // A misbehaving core can emit thousands of lines a second. Appending
+        // each one straight to `logs` republishes the view that many times and
+        // wedges the UI, so lines are collected and flushed five times a
+        // second, and a burst is summarised rather than kept.
+        pendingLog += text
+        if pendingLog.count > 64_000 {
+            let dropped = pendingLog.count - 32_000
+            pendingLog = "[warn] \(dropped) characters of core output dropped\n"
+                + String(pendingLog.suffix(32_000))
+        }
+        guard logFlushTask == nil else { return }
+        logFlushTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            self?.flushLog()
+        }
+    }
+
+    /// Moves whatever the cores printed since the last flush into `logs`.
+    private func flushLog() {
+        logFlushTask = nil
+        guard !pendingLog.isEmpty else { return }
+        logs += pendingLog
+        pendingLog = ""
         if logs.count > 20_000 {
             logs = String(logs.suffix(16_000))
         }
