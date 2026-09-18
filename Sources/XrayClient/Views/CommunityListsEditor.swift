@@ -16,6 +16,17 @@ struct CommunityListsEditor: View {
 
     @State private var confirmClear = false
 
+    // Spelled out because a private stored property makes the synthesized
+    // memberwise initializer private too, which the Swift 6.2 toolchain on CI
+    // rejects at the call site.
+    init(selected: Binding<[String]>,
+         target: Binding<RuleTarget>,
+         onChange: @escaping () -> Void) {
+        _selected = selected
+        _target = target
+        self.onChange = onChange
+    }
+
     var body: some View {
         Form {
             Section {
