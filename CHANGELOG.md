@@ -3,7 +3,7 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.5.0] — 2026-09-18
 
 ### Added
 
@@ -31,6 +31,10 @@ All notable changes to Veil are recorded here. Versions follow
   run after the LAN bypass and before the preset's country rules.
 - `geosite:` and `geoip:` entries are no longer dropped from sing-box configs;
   they become rule-sets, which is what sing-box has wanted since 1.12.
+
+The helper protocol is version 5, so **the helper has to be reinstalled** —
+Settings → TUN Helper → Install. The app refuses to drive the 1.4.x helper
+rather than starting a tunnel it knows is broken.
 
 ## [1.4.1] — 2026-09-14
 
