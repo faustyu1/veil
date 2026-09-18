@@ -238,6 +238,14 @@ final class SingBoxProfileTests: XCTestCase {
         let route = config["route"] as! [String: Any]
         XCTAssertEqual(route["default_domain_resolver"] as? String,
                        DNSSettings.Builtin.bootstrap)
+
+        // A `direct` detour is dropped (sing-box 1.12+ rejects it against an
+        // empty direct outbound); a proxy detour is kept.
+        let byTag = Dictionary(uniqueKeysWithValues:
+            servers.compactMap { ($0["tag"] as? String, $0) })
+        XCTAssertNil(byTag[DNSSettings.Builtin.bootstrap]?["detour"])
+        XCTAssertEqual(byTag[DNSSettings.Builtin.remote]?["detour"] as? String,
+                       ProfileTags.defaultSelector)
     }
 
     // MARK: - Backward compatibility

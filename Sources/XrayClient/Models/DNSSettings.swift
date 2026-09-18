@@ -55,6 +55,11 @@ struct DNSServerEntry: Codable, Equatable, Identifiable, Hashable {
     /// Outbound tag this server's own queries go through. Empty = default
     /// route. A resolver reached through the proxy hides your lookups; one on
     /// `direct` is faster and is what the bootstrap resolver must use.
+    ///
+    /// sing-box 1.12+ refuses `detour: "direct"` against an empty `direct`
+    /// outbound ("detour to an empty direct outbound makes no sense"), and an
+    /// unset detour already resolves through an empty direct dialer, so a
+    /// `direct` detour is dropped at render time (see `json(_:_:)`).
     var detour: String = ""
     /// Per-server address family preference. Empty = inherit.
     var strategy: String = ""
@@ -88,7 +93,11 @@ struct DNSServerEntry: Codable, Equatable, Identifiable, Hashable {
             if let port { dict["server_port"] = port }
             if kind.needsPath, !path.isEmpty { dict["path"] = path }
         }
-        if !detour.isEmpty && kind != .fakeip && kind != .local {
+        // An empty direct outbound is sing-box's default dialer, so naming it
+        // as a detour is redundant and, since 1.12, fatal. Drop it and let the
+        // server fall back to the (equivalent) empty direct dialer.
+        if !detour.isEmpty && kind != .fakeip && kind != .local
+            && detour != ProfileTags.direct {
             dict["detour"] = detour
         }
         if !strategy.isEmpty { dict["strategy"] = strategy }
