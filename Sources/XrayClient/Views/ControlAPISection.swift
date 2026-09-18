@@ -79,7 +79,7 @@ struct ControlAPISection: View {
         HStack(spacing: 6) {
             if control.isRunning {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text("http://127.0.0.1:\(control.port)")
+                Text(verbatim: "http://127.0.0.1:\(control.port)")
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
             } else {

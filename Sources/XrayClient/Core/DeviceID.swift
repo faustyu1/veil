@@ -33,17 +33,39 @@ enum DeviceID {
         let account = account(for: subscriptionID)
         if let cached = cache.value(for: account) { return cached }
         if let stored = read(account: account) {
-            cache.set(stored, for: account)
-            return stored
+            // Identifiers minted by builds up to 1.5.1 were full UUIDs. They
+            // are folded into the short form once and written back, so the
+            // value a panel sees stops changing shape between releases.
+            let normalized = shortened(stored)
+            if normalized != stored { write(normalized, account: account) }
+            cache.set(normalized, for: account)
+            return normalized
         }
         if subscriptionID != nil {
             // No per-subscription override: use the default identifier.
             return hwid(for: nil)
         }
-        let minted = legacyIdentifier() ?? UUID().uuidString
+        let minted = shortened(legacyIdentifier() ?? UUID().uuidString)
         write(minted, account: account)
         cache.set(minted, for: account)
         return minted
+    }
+
+    /// The identifier format Veil presents: 16 uppercase hex characters, e.g.
+    /// `E0104A37B8464E6B`.
+    ///
+    /// A UUID carries 128 bits and reads like a database key in a panel's
+    /// device list. Half of it is still 64 bits — far more than the handful of
+    /// devices one account ever registers — and it fits on one line. Folding is
+    /// deterministic, so an existing install keeps a stable prefix of the
+    /// identifier it already had rather than being handed a brand new one.
+    static func shortened(_ value: String) -> String {
+        let hex = value.uppercased().filter { $0.isHexDigit }
+        guard hex.count >= 16 else {
+            // Not a UUID-shaped value (a panel-supplied id, say): leave it be.
+            return value
+        }
+        return String(hex.prefix(16))
     }
 
     /// Mints a fresh identifier. Pass a subscription id to give that one
@@ -51,7 +73,7 @@ enum DeviceID {
     @discardableResult
     static func regenerate(for subscriptionID: UUID? = nil) -> String {
         let account = account(for: subscriptionID)
-        let minted = UUID().uuidString
+        let minted = shortened(UUID().uuidString)
         write(minted, account: account)
         cache.set(minted, for: account)
         return minted
@@ -214,11 +236,14 @@ enum DeviceInfo {
             : "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
     }()
 
-    /// Default User-Agent. It carries the same device facts as the `X-Device-*`
-    /// headers and deliberately **not** the HWID — the UA is visible to every
-    /// proxy on the path, and the panel already gets the HWID in `X-Hwid`.
+    /// Default User-Agent: the client name and its version, nothing else.
+    ///
+    /// The device facts (model, OS, OS version) travel in the `X-Device-*`
+    /// headers, which only the panel reads. The User-Agent is visible to every
+    /// proxy and CDN on the path, so repeating the hardware model there just
+    /// fingerprints the machine for anyone watching. The HWID was never in it.
     static var defaultUserAgent: String {
-        "Veil/\(AppVersion.current) (\(osName) \(osVersion); \(model))"
+        "Veil/\(AppVersion.current)"
     }
 
     /// The User-Agent to send, honouring a user override for panels with

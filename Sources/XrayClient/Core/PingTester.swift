@@ -109,6 +109,13 @@ final class PingTester {
 
     func isTesting(_ id: UUID) -> Bool { testing.contains(id) }
 
+    /// True once at least one server has been measured. The list filters read
+    /// this to tell "nothing responded" apart from "nothing was measured".
+    var hasResults: Bool { !results.isEmpty }
+
+    /// True while a batch is in flight.
+    var isBusy: Bool { !testing.isEmpty }
+
     func clear() {
         results.removeAll()
         testing.removeAll()

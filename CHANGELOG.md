@@ -3,6 +3,55 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-09-18
+
+### Added
+
+- In-app updates. Veil checks its GitHub releases, shows what changed, downloads
+  the new build with a real byte counter and a Cancel button, and swaps the
+  bundle on the next launch. A check the user asks for answers with a standard
+  system alert when there is nothing to install, with a Version History button
+  next to OK.
+- An About window with the version, the build and the links people actually
+  follow.
+- Community rule lists: curated domain and IP lists that can be switched on in
+  Routing and pointed at proxy, direct or block. The lists are cached on disk
+  and refreshed on demand; only the chosen ids are stored in settings.
+- Settings and Routing are windows of their own — ⌘, opens Settings — with the
+  section switcher in the title bar instead of a tab strip below it.
+
+### Changed
+
+- The interface was rebuilt on native macOS components throughout: the groups
+  editor no longer shows a checklist of every server that exists, the
+  application picker has search, scopes and real checkboxes, and the DNS editor
+  lays its fields out as labelled rows instead of stretched text fields.
+- Release builds are stamped with the SDK they were built against, so the app
+  renders in the current macOS style rather than the legacy one.
+- All secrets now live in a single keychain item. Veil is signed ad hoc, so its
+  code hash changes with every build and macOS asks for authorisation again —
+  one item means one dialog instead of one per subscription per launch.
+- The device identifier is 16 hexadecimal characters instead of a full UUID.
+  Existing installs keep a stable prefix of the identifier they already had.
+- The User-Agent carries only the client name and version. The device facts stay
+  in the `X-Device-*` headers, which only the panel reads.
+- Connecting and switching servers is faster: the SOCKS port is polled every
+  25 ms instead of waiting out a fixed delay, the system proxy is configured off
+  the main actor, and the primary network service is cached for 15 seconds and
+  re-resolved when the network changes.
+- Plans with no traffic cap are shown as unlimited instead of "Zero KB".
+
+### Fixed
+
+- The Xray access log no longer goes to standard output. A busy connection could
+  produce thousands of lines a second, which flooded the log view and could take
+  the app down with it; core output is now buffered and capped as well.
+- Stopping a core waits for the process to exit, so the replacement can bind the
+  SOCKS port instead of failing and being retried by the watchdog.
+- The empty state in Groups is centred in the window.
+- `Scripts/run-app.sh` quits the running copy before relaunching, instead of
+  activating the old process and appearing to do nothing.
+
 ## [1.5.1] — 2026-09-18
 
 ### Fixed

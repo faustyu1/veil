@@ -52,6 +52,10 @@ enum XrayConfigBuilder {
         let balancerTags = isBalancer ? proxyOutbounds.compactMap { $0["tag"] as? String } : []
 
         var log: [String: Any] = ["loglevel": logLevel]
+        // Xray's access log defaults to stdout: one line per connection, which
+        // a browser turns into thousands per second. It goes nowhere unless the
+        // user actually asked for debug output.
+        log["access"] = logLevel == "debug" ? "" : "none"
         if let logFile, !logFile.isEmpty {
             log["error"] = logFile
             log["access"] = "none"

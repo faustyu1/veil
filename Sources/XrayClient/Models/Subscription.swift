@@ -52,6 +52,17 @@ struct Subscription: Codable, Identifiable, Equatable {
         return min(1.0, Double(used) / Double(total))
     }
 
+    /// True when the plan has no traffic cap. Panels say so by sending
+    /// `total=0` — which `ByteCountFormatter` renders as "Zero KB", a quota of
+    /// nothing rather than the unlimited one it means.
+    var isUnlimitedTraffic: Bool {
+        guard let total = totalBytes else { return false }
+        return total <= 0
+    }
+
+    /// True when there is any traffic figure worth putting on screen.
+    var hasTrafficInfo: Bool { usedBytes != nil }
+
     /// The manual/local group is the one that never had a URL. A subscription
     /// whose URL is in the Keychain is not manual even while `url` is nil.
     var isManual: Bool { url == nil && hasStoredURL != true }

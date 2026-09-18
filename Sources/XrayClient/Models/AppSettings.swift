@@ -77,6 +77,15 @@ struct AppSettings: Codable, Equatable {
     /// `geoip:` entries are derived at build time and need no storage.
     var ruleSets: [RuleSetRef] = []
 
+    /// Community rule lists the user turned on, by `CommunityList.id`. Only
+    /// the ids live here; the lists themselves are cached on disk by
+    /// `CommunityListManager`, because they are bulk data that can be fetched
+    /// again at any time.
+    var communityLists: [String] = []
+    /// Where a match in one of those lists goes. Selecting a list normally
+    /// means "send this through the tunnel", which is what `.proxy` does.
+    var communityListTarget: RuleTarget = .proxy
+
     // Resolver
     var dns = DNSSettings()
 
@@ -144,6 +153,8 @@ struct AppSettings: Codable, Equatable {
         customGeositeURL = get(.customGeositeURL, "")
         serverGroups = get(.serverGroups, [])
         ruleSets = get(.ruleSets, [])
+        communityLists = get(.communityLists, [])
+        communityListTarget = get(.communityListTarget, .proxy)
         dns = get(.dns, DNSSettings())
         useNativeTun = get(.useNativeTun, true)
         tunStrictRoute = get(.tunStrictRoute, false)
@@ -180,6 +191,7 @@ struct AppSettings: Codable, Equatable {
         // win, and the preset's country rules, which must not.
         routingPreset.guardRules(blockAds: blockAds)
             + customRules
+            + CommunityListManager.rules(for: self)
             + routingPreset.presetRules()
     }
 }

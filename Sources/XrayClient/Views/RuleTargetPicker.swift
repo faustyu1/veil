@@ -7,6 +7,7 @@ import SwiftUI
 /// them every rule can only say "proxy or not". The list is flat with section
 /// headers because a rule editor row has no space for a nested menu.
 struct RuleTargetPicker: View {
+    @Environment(Loc.self) private var loc
     @Binding var target: RuleTarget
     var servers: [ProxyConfig]
     var groups: [ServerGroup]
@@ -14,13 +15,13 @@ struct RuleTargetPicker: View {
 
     var body: some View {
         Picker("", selection: $target) {
-            Text("Proxy").tag(RuleTarget.proxy)
-            Text("Direct").tag(RuleTarget.direct)
-            Text("Block").tag(RuleTarget.block)
+            Text(loc("Proxy")).tag(RuleTarget.proxy)
+            Text(loc("Direct")).tag(RuleTarget.direct)
+            Text(loc("Block")).tag(RuleTarget.block)
             if !groups.isEmpty {
                 Divider()
                 ForEach(groups) { group in
-                    Text(group.name.isEmpty ? "Group" : group.name)
+                    Text(group.name.isEmpty ? loc("Group") : group.name)
                         .tag(RuleTarget.group(group.id))
                 }
             }
