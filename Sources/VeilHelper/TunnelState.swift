@@ -16,6 +16,10 @@ struct TunnelState: Codable {
     /// Resolvers each network service had before the tunnel touched it.
     var savedDNS: [String: [String]] = [:]
     var tun2socksPID: Int32?
+    /// PID of the routing core when the helper runs it directly (native TUN).
+    /// Mutually exclusive with `tun2socksPID` — the two are different ways of
+    /// owning the same interface.
+    var corePID: Int32?
 
     static var fileURL: URL { URL(fileURLWithPath: VeilHelperInfo.statePath) }
 

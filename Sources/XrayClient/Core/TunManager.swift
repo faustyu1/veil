@@ -89,12 +89,45 @@ enum TunManager {
         try? PrivilegedHelper.stopTunnel()
     }
 
+    // MARK: - Native core (sing-box owns the interface)
+
+    /// Hands the whole profile to the helper, which runs sing-box as root.
+    ///
+    /// Unlike `up`, nothing here pins routes or rewrites DNS: the core brings
+    /// up its own interface and installs its own routes. That is the point —
+    /// with tun2socks in front, the PID behind a connection is lost before
+    /// routing happens, so no process rule could ever match.
+    static func startNativeCore(config: Data) throws {
+        if !isHelperInstalled {
+            try installHelper()
+        }
+        try PrivilegedHelper.startCore(config: config)
+    }
+
+    /// Replaces the running core's configuration — a server switch, a rule
+    /// change, anything that alters the profile.
+    static func reloadNativeCore(config: Data) throws {
+        guard isHelperInstalled else { return try startNativeCore(config: config) }
+        try PrivilegedHelper.reloadCore(config: config)
+    }
+
+    static func stopNativeCore() {
+        try? PrivilegedHelper.stopCore()
+    }
+
+    /// Whether the helper says the core is up, and the tail of its log.
+    static var nativeCoreStatus: (running: Bool, log: String?) {
+        PrivilegedHelper.coreStatus()
+    }
+
     /// Whether the helper says a tunnel is up right now.
     static var looksActive: Bool { PrivilegedHelper.tunnelIsUp }
 
     /// Cleans up a tunnel left behind by a crash or a force-quit.
     static func emergencyCleanup() {
-        guard PrivilegedHelper.isInstalled, PrivilegedHelper.tunnelIsUp else { return }
+        guard PrivilegedHelper.isInstalled else { return }
+        if PrivilegedHelper.coreStatus().running { stopNativeCore() }
+        guard PrivilegedHelper.tunnelIsUp else { return }
         down()
     }
 
