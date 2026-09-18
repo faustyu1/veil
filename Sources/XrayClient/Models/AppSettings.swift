@@ -69,6 +69,28 @@ struct AppSettings: Codable, Equatable {
     var customGeoipURL: String = ""
     var customGeositeURL: String = ""
 
+    // Routing v2 — the outbound graph. Groups are named sets of servers that
+    // behave like one outbound, so a rule can send an app through a specific
+    // group instead of through "the proxy".
+    var serverGroups: [ServerGroup] = []
+    /// Rule-sets the user added by hand. The ones implied by `geosite:` /
+    /// `geoip:` entries are derived at build time and need no storage.
+    var ruleSets: [RuleSetRef] = []
+
+    // Resolver
+    var dns = DNSSettings()
+
+    // sing-box TUN. Process-aware rules only work when sing-box owns the
+    // interface, so the native inbound is the default and tun2socks is the
+    // fallback for anyone who hits a problem with it.
+    var useNativeTun: Bool = true
+    var tunStrictRoute: Bool = false
+    var tunStack: String = ""
+
+    // Local control API (Clash-compatible, served by sing-box).
+    var controlAPIEnabled: Bool = true
+    var controlAPIPort: Int = 9090
+
     // Startup
     var autoConnectOnLaunch: Bool = false
     var launchAtLogin: Bool = false
@@ -114,6 +136,14 @@ struct AppSettings: Codable, Equatable {
         geoSource = get(.geoSource, .loyalsoldier)
         customGeoipURL = get(.customGeoipURL, "")
         customGeositeURL = get(.customGeositeURL, "")
+        serverGroups = get(.serverGroups, [])
+        ruleSets = get(.ruleSets, [])
+        dns = get(.dns, DNSSettings())
+        useNativeTun = get(.useNativeTun, true)
+        tunStrictRoute = get(.tunStrictRoute, false)
+        tunStack = get(.tunStack, "")
+        controlAPIEnabled = get(.controlAPIEnabled, true)
+        controlAPIPort = get(.controlAPIPort, 9090)
         autoConnectOnLaunch = get(.autoConnectOnLaunch, false)
         launchAtLogin = get(.launchAtLogin, false)
         notifyOnConnect = get(.notifyOnConnect, false)
@@ -139,7 +169,7 @@ struct AppSettings: Codable, Equatable {
         if routingPreset == .custom {
             var rules: [RoutingRule] = []
             if blockAds {
-                rules.append(RoutingRule(name: "Block ads", outbound: .block,
+                rules.append(RoutingRule(name: "Block ads", target: .block,
                                          domains: ["geosite:category-ads-all"]))
             }
             rules.append(contentsOf: customRules)

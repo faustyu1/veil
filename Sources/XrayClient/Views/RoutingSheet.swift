@@ -123,7 +123,10 @@ struct RoutingSheet: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             ForEach($store.settings.customRules) { $rule in
-                RuleCard(rule: $rule, onChange: { store.save() }, onDelete: { id in
+                RuleCard(rule: $rule,
+                         servers: store.allServers,
+                         groups: store.settings.serverGroups,
+                         onChange: { store.save() }, onDelete: { id in
                     store.settings.customRules.removeAll { $0.id == id }
                     store.save()
                 })
@@ -175,6 +178,8 @@ struct RoutingSheet: View {
 private struct RuleCard: View {
     @Binding var rule: RoutingRule
     @Environment(Loc.self) private var loc
+    var servers: [ProxyConfig] = []
+    var groups: [ServerGroup] = []
     var onChange: () -> Void
     var onDelete: (UUID) -> Void
 
@@ -187,11 +192,10 @@ private struct RuleCard: View {
                 TextField(loc("Rule name"), text: $rule.name)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: rule.name) { _, _ in onChange() }
-                Picker("", selection: $rule.outbound) {
-                    ForEach(RuleOutbound.allCases) { o in Text(o.title).tag(o) }
-                }
-                .labelsHidden().fixedSize()
-                .onChange(of: rule.outbound) { _, _ in onChange() }
+                RuleTargetPicker(target: $rule.target,
+                                 servers: servers,
+                                 groups: groups,
+                                 onChange: onChange)
                 let ruleID = rule.id
                 Button(role: .destructive) { onDelete(ruleID) } label: {
                     Image(systemName: "trash")
