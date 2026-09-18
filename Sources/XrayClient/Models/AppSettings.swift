@@ -69,6 +69,34 @@ struct AppSettings: Codable, Equatable {
     var customGeoipURL: String = ""
     var customGeositeURL: String = ""
 
+    // Routing v2 — the outbound graph. Groups are named sets of servers that
+    // behave like one outbound, so a rule can send an app through a specific
+    // group instead of through "the proxy".
+    var serverGroups: [ServerGroup] = []
+    /// Rule-sets the user added by hand. The ones implied by `geosite:` /
+    /// `geoip:` entries are derived at build time and need no storage.
+    var ruleSets: [RuleSetRef] = []
+
+    // Resolver
+    var dns = DNSSettings()
+
+    // sing-box TUN. Process-aware rules only work when sing-box owns the
+    // interface, so the native inbound is the default and tun2socks is the
+    // fallback for anyone who hits a problem with it.
+    var useNativeTun: Bool = true
+    var tunStrictRoute: Bool = false
+    var tunStack: String = ""
+
+    // Local control API (Clash-compatible, served by sing-box).
+    var controlAPIEnabled: Bool = true
+    var controlAPIPort: Int = 9090
+
+    // Veil's own control API: read and write the routing configuration from
+    // outside the app. Off by default — it can change where the machine's
+    // traffic goes, so it is turned on deliberately or not at all.
+    var veilAPIEnabled: Bool = false
+    var veilAPIPort: Int = 9091
+
     // Startup
     var autoConnectOnLaunch: Bool = false
     var launchAtLogin: Bool = false
@@ -114,6 +142,16 @@ struct AppSettings: Codable, Equatable {
         geoSource = get(.geoSource, .loyalsoldier)
         customGeoipURL = get(.customGeoipURL, "")
         customGeositeURL = get(.customGeositeURL, "")
+        serverGroups = get(.serverGroups, [])
+        ruleSets = get(.ruleSets, [])
+        dns = get(.dns, DNSSettings())
+        useNativeTun = get(.useNativeTun, true)
+        tunStrictRoute = get(.tunStrictRoute, false)
+        tunStack = get(.tunStack, "")
+        controlAPIEnabled = get(.controlAPIEnabled, true)
+        controlAPIPort = get(.controlAPIPort, 9090)
+        veilAPIEnabled = get(.veilAPIEnabled, false)
+        veilAPIPort = get(.veilAPIPort, 9091)
         autoConnectOnLaunch = get(.autoConnectOnLaunch, false)
         launchAtLogin = get(.launchAtLogin, false)
         notifyOnConnect = get(.notifyOnConnect, false)
@@ -136,16 +174,13 @@ struct AppSettings: Codable, Equatable {
     /// The ordered routing rules to feed Xray, derived from the active preset
     /// (or the user's custom list).
     var effectiveRoutingRules: [RoutingRule] {
-        if routingPreset == .custom {
-            var rules: [RoutingRule] = []
-            if blockAds {
-                rules.append(RoutingRule(name: "Block ads", outbound: .block,
-                                         domains: ["geosite:category-ads-all"]))
-            }
-            rules.append(contentsOf: customRules)
-            return rules
-        }
-        return routingPreset.builtInRules(blockAds: blockAds)
+        // The user's own rules apply under every preset, not only "Custom" —
+        // wanting one application on a particular server is no reason to give
+        // up the preset's bypasses. They sit between the guards, which have to
+        // win, and the preset's country rules, which must not.
+        routingPreset.guardRules(blockAds: blockAds)
+            + customRules
+            + routingPreset.presetRules()
     }
 }
 

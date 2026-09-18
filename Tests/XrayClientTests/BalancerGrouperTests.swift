@@ -96,14 +96,23 @@ final class BalancerGrouperTests: XCTestCase {
         let dict = SingBoxConfigBuilder.build(for: main)
         let outbounds = dict["outbounds"] as! [[String: Any]]
         let tags = outbounds.compactMap { $0["tag"] as? String }
-        XCTAssertTrue(tags.contains("proxy-0"))
-        XCTAssertTrue(tags.contains("proxy-1"))
-        XCTAssertTrue(tags.contains("proxy"))
+        // Nodes now carry stable per-server tags, and the balancer is a group
+        // over them; `proxy` is the selector that fronts the whole graph.
+        let mainTag = ProfileTags.server(main.id)
+        let altTag = ProfileTags.server(alt.id)
+        let groupTag = ProfileTags.group(main.id)
+        XCTAssertTrue(tags.contains(mainTag))
+        XCTAssertTrue(tags.contains(altTag))
+        XCTAssertTrue(tags.contains(groupTag))
+        XCTAssertTrue(tags.contains(ProfileTags.defaultSelector))
 
-        let urltest = outbounds.first { $0["tag"] as? String == "proxy" }
+        let urltest = outbounds.first { $0["tag"] as? String == groupTag }
         XCTAssertEqual(urltest?["type"] as? String, "urltest")
-        let selector = urltest?["outbounds"] as! [String]
-        XCTAssertTrue(selector.contains("proxy-0"))
-        XCTAssertTrue(selector.contains("proxy-1"))
+        let members = urltest?["outbounds"] as! [String]
+        XCTAssertTrue(members.contains(mainTag))
+        XCTAssertTrue(members.contains(altTag))
+
+        let selector = outbounds.first { $0["tag"] as? String == ProfileTags.defaultSelector }
+        XCTAssertEqual(selector?["default"] as? String, groupTag)
     }
 }

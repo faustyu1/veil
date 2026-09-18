@@ -277,6 +277,14 @@ final class XrayConfigBuilderTests: XCTestCase {
 
 final class SingBoxConfigBuilderTests: XCTestCase {
 
+    /// The node's own outbound. Since the builder started emitting a graph,
+    /// `proxy` is the selector in front of the nodes rather than the node
+    /// itself, so tests look the node up by its stable per-server tag.
+    private func node(_ dict: [String: Any], _ cfg: ProxyConfig) -> [String: Any] {
+        let outbounds = dict["outbounds"] as! [[String: Any]]
+        return outbounds.first { ($0["tag"] as? String) == ProfileTags.server(cfg.id) }!
+    }
+
     func testHysteria2Outbound() throws {
         var cfg = ProxyConfig(name: "t", proto: .hysteria2, address: "h.com", port: 443)
         cfg.password = "pw"
@@ -286,8 +294,7 @@ final class SingBoxConfigBuilderTests: XCTestCase {
         cfg.allowInsecure = true
 
         let dict = SingBoxConfigBuilder.build(for: cfg)
-        let outbounds = dict["outbounds"] as! [[String: Any]]
-        let proxy = outbounds.first { ($0["tag"] as? String) == "proxy" }!
+        let proxy = node(dict, cfg)
         XCTAssertEqual(proxy["type"] as? String, "hysteria2")
         XCTAssertEqual(proxy["server"] as? String, "h.com")
         XCTAssertEqual(proxy["server_port"] as? Int, 443)
@@ -310,7 +317,7 @@ final class SingBoxConfigBuilderTests: XCTestCase {
         cfg.udpRelayMode = "native"
 
         let dict = SingBoxConfigBuilder.build(for: cfg)
-        let proxy = (dict["outbounds"] as! [[String: Any]]).first { ($0["tag"] as? String) == "proxy" }!
+        let proxy = node(dict, cfg)
         XCTAssertEqual(proxy["type"] as? String, "tuic")
         XCTAssertEqual(proxy["uuid"] as? String, "uuid-1")
         XCTAssertEqual(proxy["password"] as? String, "pw")
@@ -327,7 +334,7 @@ final class SingBoxConfigBuilderTests: XCTestCase {
         XCTAssertTrue(types.contains("socks"))
         XCTAssertTrue(types.contains("http"))
         // TUIC defaults applied when link omits them.
-        let proxy = (dict["outbounds"] as! [[String: Any]]).first { ($0["tag"] as? String) == "proxy" }!
+        let proxy = node(dict, cfg)
         XCTAssertEqual(proxy["congestion_control"] as? String, "bbr")
         XCTAssertEqual(proxy["udp_relay_mode"] as? String, "native")
     }
@@ -343,7 +350,7 @@ final class SingBoxConfigBuilderTests: XCTestCase {
         var cfg = ProxyConfig(name: "t", proto: .anytls, address: "h.com", port: 8443)
         cfg.password = "pw"; cfg.sni = "e.com"
         let dict = SingBoxConfigBuilder.build(for: cfg)
-        let proxy = (dict["outbounds"] as! [[String: Any]]).first { ($0["tag"] as? String) == "proxy" }!
+        let proxy = node(dict, cfg)
         XCTAssertEqual(proxy["type"] as? String, "anytls")
         XCTAssertEqual(proxy["password"] as? String, "pw")
         let tls = proxy["tls"] as! [String: Any]
@@ -365,9 +372,14 @@ final class SingBoxConfigBuilderTests: XCTestCase {
         XCTAssertEqual(peer["public_key"] as? String, "pub")
         XCTAssertEqual(peer["address"] as? String, "h.com")
         XCTAssertEqual(peer["port"] as? Int, 51820)
-        // outbounds should NOT contain a proxy tag for wireguard.
+        XCTAssertEqual(ep["tag"] as? String, ProfileTags.server(cfg.id))
+        // The endpoint is not duplicated as an outbound; the selector in front
+        // of it points straight at the endpoint's tag.
         let outTags = (dict["outbounds"] as! [[String: Any]]).compactMap { $0["tag"] as? String }
-        XCTAssertFalse(outTags.contains("proxy"))
+        XCTAssertFalse(outTags.contains(ProfileTags.server(cfg.id)))
+        let selector = (dict["outbounds"] as! [[String: Any]])
+            .first { ($0["tag"] as? String) == ProfileTags.defaultSelector }!
+        XCTAssertEqual(selector["default"] as? String, ProfileTags.server(cfg.id))
     }
 }
 

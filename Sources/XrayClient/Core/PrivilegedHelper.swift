@@ -101,6 +101,45 @@ enum PrivilegedHelper {
         }
     }
 
+    /// Starts the routing core as root against `config`.
+    ///
+    /// The bytes cross the boundary, not a filename: the helper validates the
+    /// configuration and writes it into its own directory.
+    static func startCore(config: Data) throws {
+        try perform(timeout: 30) { proxy, finish in
+            proxy.startCore(config: config, reply: finish.finish)
+        }
+    }
+
+    /// Swaps the running core's configuration — this is what a server switch
+    /// costs once sing-box owns the tunnel.
+    static func reloadCore(config: Data) throws {
+        try perform(timeout: 30) { proxy, finish in
+            proxy.reloadCore(config: config, reply: finish.finish)
+        }
+    }
+
+    static func stopCore() throws {
+        try perform(timeout: 20) { proxy, finish in
+            proxy.stopCore(reply: finish.finish)
+        }
+    }
+
+    /// Whether the core is running, plus the tail of its root-owned log.
+    static func coreStatus() -> (running: Bool, log: String?) {
+        guard isInstalled else { return (false, nil) }
+        let running = Box<Bool>()
+        let tail = Box<String>()
+        try? perform(timeout: 5) { proxy, finish in
+            proxy.coreStatus { isUp, output in
+                running.value = isUp
+                tail.value = output
+                finish(nil)
+            }
+        }
+        return (running.value ?? false, tail.value)
+    }
+
     /// Whether a tunnel is currently up according to the helper itself, rather
     /// than according to a file someone could have left behind.
     static var tunnelIsUp: Bool {

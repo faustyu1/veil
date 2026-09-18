@@ -8,7 +8,7 @@ public enum VeilHelperInfo {
 
     /// Bumped whenever the protocol changes. The app refuses to talk to a
     /// helper that does not match and asks the user to reinstall it.
-    public static let protocolVersion = 4
+    public static let protocolVersion = 5
 
     /// Root-owned directory holding the helper, `tun2socks`, the pinned client
     /// requirement and the tunnel state. Nothing here is writable by the user,
@@ -22,6 +22,24 @@ public enum VeilHelperInfo {
     }
 
     public static var tun2socksPath: String { installDirectory + "/tun2socks" }
+
+    /// The routing core the helper runs as root when the app asks for the
+    /// native TUN inbound. It is a copy inside the root-owned install
+    /// directory, not the one in the app bundle: root must not execute a
+    /// binary the user can replace.
+    public static var singBoxPath: String { installDirectory + "/sing-box" }
+
+    /// Where the helper writes the configuration it was handed. The app sends
+    /// bytes, never a path, so there is nothing for a caller to redirect.
+    public static var coreConfigPath: String { installDirectory + "/core.json" }
+
+    /// Working directory handed to the core, holding its cache file and
+    /// downloaded rule-sets.
+    public static var coreWorkingDirectory: String { installDirectory + "/core" }
+
+    public static var coreCachePath: String { coreWorkingDirectory + "/cache.db" }
+
+    public static var coreLogPath: String { installDirectory + "/core.log" }
     public static var statePath: String { installDirectory + "/tunnel-state.json" }
     public static var logPath: String { installDirectory + "/tun2socks.log" }
 
@@ -67,4 +85,27 @@ public enum VeilHelperInfo {
 
     /// Whether a tunnel is currently up, and the device it is on.
     func tunnelStatus(reply: @escaping (Bool, String?) -> Void)
+
+    /// Runs the bundled routing core as root against `config`.
+    ///
+    /// The core brings up its own TUN interface and installs its own routes,
+    /// which is what makes process-aware rules possible: with `tun2socks` in
+    /// front, the core only ever sees a finished SOCKS stream and the PID
+    /// behind a connection is already lost.
+    ///
+    /// The configuration crosses as bytes. The helper validates it, pins every
+    /// path it contains to its own directory and writes it out itself, so no
+    /// filename from the app is ever opened by root.
+    func startCore(config: Data, reply: @escaping (String?) -> Void)
+
+    /// Replaces the running core's configuration. Same validation as
+    /// `startCore`; restarts the core in place.
+    func reloadCore(config: Data, reply: @escaping (String?) -> Void)
+
+    /// Stops the core and removes the interface it created.
+    func stopCore(reply: @escaping (String?) -> Void)
+
+    /// Whether the core is running, plus the last few lines it logged — the
+    /// app has no way to read a root-owned log itself.
+    func coreStatus(reply: @escaping (Bool, String?) -> Void)
 }
