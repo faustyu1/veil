@@ -18,8 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select latest Xcode (macOS 26 SDK)
-        run: sudo xcode-select -s /Applications/Xcode.app
+      # Pin Xcode 26.5 (Swift 6.3.2). The 26.6 default (Swift 6.3.3) has a
+      # compiler regression that makes the release build of this module take
+      # ~25 minutes; the same code compiles in ~2 minutes on 6.3.2 and in
+      # ~25 seconds on Swift 6.4. Bump back to the default once the runner
+      # ships Swift >= 6.4.
+      - name: Select Xcode 26.5 (Swift 6.3.2)
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
 
       - name: Show toolchain
         run: |
@@ -49,12 +54,7 @@ jobs:
 
       - name: Build & test
         run: |
-          # Swift 6.3.x on the macos-26 runner has a whole-module-optimization
-          # regression that makes the release build of this module take ~25 min
-          # (the same code compiles in ~25s on Swift 6.4). Disabling WMO drops
-          # the build back to a couple of minutes at the cost of some
-          # cross-module inlining. Remove once the runner ships Swift >= 6.4.
-          swift build -c release -Xswiftc -no-whole-module-optimization
+          swift build -c release
           swift test
 
       - name: Package Veil.app
