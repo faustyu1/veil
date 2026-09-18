@@ -166,16 +166,13 @@ struct AppSettings: Codable, Equatable {
     /// The ordered routing rules to feed Xray, derived from the active preset
     /// (or the user's custom list).
     var effectiveRoutingRules: [RoutingRule] {
-        if routingPreset == .custom {
-            var rules: [RoutingRule] = []
-            if blockAds {
-                rules.append(RoutingRule(name: "Block ads", target: .block,
-                                         domains: ["geosite:category-ads-all"]))
-            }
-            rules.append(contentsOf: customRules)
-            return rules
-        }
-        return routingPreset.builtInRules(blockAds: blockAds)
+        // The user's own rules apply under every preset, not only "Custom" —
+        // wanting one application on a particular server is no reason to give
+        // up the preset's bypasses. They sit between the guards, which have to
+        // win, and the preset's country rules, which must not.
+        routingPreset.guardRules(blockAds: blockAds)
+            + customRules
+            + routingPreset.presetRules()
     }
 }
 

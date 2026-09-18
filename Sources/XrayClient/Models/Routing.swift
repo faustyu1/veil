@@ -311,6 +311,16 @@ enum RoutingPreset: String, Codable, CaseIterable, Identifiable {
     /// Builds the ordered rule list for built-in presets. `custom` returns the
     /// user's stored rules instead (handled by the caller).
     func builtInRules(blockAds: Bool) -> [RoutingRule] {
+        guardRules(blockAds: blockAds) + presetRules()
+    }
+
+    /// Rules that must stay ahead of anything the user writes.
+    ///
+    /// A user rule usually names an application, and an application talks to
+    /// the LAN as well as to the internet. Letting such a rule outrank the
+    /// private-range bypass would push the printer and the NAS through the
+    /// tunnel, which is never what was meant.
+    func guardRules(blockAds: Bool) -> [RoutingRule] {
         var rules: [RoutingRule] = []
         if blockAds {
             rules.append(RoutingRule(name: "Block ads",
@@ -318,29 +328,39 @@ enum RoutingPreset: String, Codable, CaseIterable, Identifiable {
                                      domains: ["geosite:category-ads-all"]))
         }
         switch self {
-        case .global:
+        case .global, .custom:
             break
         case .bypassLAN:
             rules.append(RoutingRule(name: "LAN direct", target: .direct,
                                      ips: Self.privateCIDRs))
-        case .bypassChina:
+        case .bypassChina, .bypassRussia:
             rules.append(RoutingRule(name: "LAN direct", target: .direct,
                                      ips: Self.privateCIDRs + ["geoip:private"]))
-            rules.append(RoutingRule(name: "China sites direct", target: .direct,
-                                     domains: ["geosite:cn"]))
-            rules.append(RoutingRule(name: "China IPs direct", target: .direct,
-                                     ips: ["geoip:cn"]))
-        case .bypassRussia:
-            rules.append(RoutingRule(name: "LAN direct", target: .direct,
-                                     ips: Self.privateCIDRs + ["geoip:private"]))
-            rules.append(RoutingRule(name: "RU gov & category direct", target: .direct,
-                                     domains: ["geosite:category-gov-ru", "geosite:category-ru"]))
-            rules.append(RoutingRule(name: "RU IPs direct", target: .direct,
-                                     ips: ["geoip:ru"]))
-        case .custom:
-            break
         }
         return rules
+    }
+
+    /// The preset's own opinion about where traffic goes, applied after the
+    /// user's rules have had their say.
+    func presetRules() -> [RoutingRule] {
+        switch self {
+        case .global, .bypassLAN, .custom:
+            return []
+        case .bypassChina:
+            return [
+                RoutingRule(name: "China sites direct", target: .direct,
+                            domains: ["geosite:cn"]),
+                RoutingRule(name: "China IPs direct", target: .direct,
+                            ips: ["geoip:cn"])
+            ]
+        case .bypassRussia:
+            return [
+                RoutingRule(name: "RU gov & category direct", target: .direct,
+                            domains: ["geosite:category-gov-ru", "geosite:category-ru"]),
+                RoutingRule(name: "RU IPs direct", target: .direct,
+                            ips: ["geoip:ru"])
+            ]
+        }
     }
 }
 

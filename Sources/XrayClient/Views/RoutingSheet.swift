@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// Professional routing configuration: preset selection, geo .dat source +
-/// downloader, ad-block toggle, and a full rule editor (v2rayN-style) for the
-/// custom preset.
+/// Routing configuration: the preset, the rule list, the groups a rule can
+/// point at, the resolver, and the geo database the older matchers need.
+///
+/// The four are one sheet because they are one decision — "where does this
+/// traffic go" — taken at four levels of detail.
 struct RoutingSheet: View {
     @Environment(ServerStore.self) private var store
     @Environment(ConnectionManager.self) private var connection
@@ -11,52 +13,184 @@ struct RoutingSheet: View {
 
     private var geo = GeoAssetManager.shared
 
-    var body: some View {
-        @Bindable var store = store
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(loc("Routing")).font(.title2).bold()
-                Spacer()
-                Button(loc("Done")) { applyAndDismiss() }
-                    .keyboardShortcut(.defaultAction)
-                    .glassProminentButton()
+    enum Tab: String, CaseIterable, Identifiable {
+        case rules, groups, dns, database
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .rules:    return "Rules"
+            case .groups:   return "Groups"
+            case .dns:      return "DNS"
+            case .database: return "Database"
             }
-            .padding()
-            Divider()
+        }
+        var icon: String {
+            switch self {
+            case .rules:    return "arrow.triangle.branch"
+            case .groups:   return "square.stack.3d.up"
+            case .dns:      return "globe"
+            case .database: return "externaldrive"
+            }
+        }
+    }
 
+    @State private var tab: Tab = .rules
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            content
+            if connection.isConnected {
+                Divider()
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise.circle")
+                    Text(loc("Changes apply on the next connect or reconnect."))
+                }
+                .font(.caption).foregroundStyle(.orange)
+                .padding(.horizontal).padding(.vertical, 7)
+            }
+        }
+        .frame(width: 720, height: 680)
+    }
+
+    private var header: some View {
+        HStack {
+            Text(loc("Routing")).font(.title2).bold()
+            Spacer()
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases) { t in
+                    Label(loc(t.title), systemImage: t.icon).tag(t)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Spacer()
+            Button(loc("Done")) { applyAndDismiss() }
+                .keyboardShortcut(.defaultAction)
+                .glassProminentButton()
+        }
+        .padding()
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        @Bindable var store = store
+        switch tab {
+        case .rules:
             Form {
                 presetSection
-                geoSection
-                if store.settings.routingPreset == .custom {
-                    customRulesSection
-                }
-                if connection.isConnected {
-                    Section {
-                        Text(loc("Reconnect to apply routing changes."))
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                }
+                rulesSection
             }
             .formStyle(.grouped)
+        case .groups:
+            ServerGroupsEditor(groups: $store.settings.serverGroups,
+                               servers: store.allServers,
+                               onChange: { store.save() })
+        case .dns:
+            DNSEditor(dns: $store.settings.dns,
+                      servers: store.allServers,
+                      groups: store.settings.serverGroups,
+                      onChange: { store.save() })
+        case .database:
+            Form { geoSection }
+                .formStyle(.grouped)
         }
-        .frame(width: 560, height: 640)
     }
 
     // MARK: - Preset
 
     private var presetSection: some View {
         @Bindable var store = store
-        return Section(loc("Mode")) {
+        return Section {
             Picker(loc("Preset"), selection: $store.settings.routingPreset) {
-                ForEach(RoutingPreset.allCases) { p in Text(p.title).tag(p) }
+                ForEach(RoutingPreset.allCases) { p in Text(loc(p.title)).tag(p) }
             }
             .onChange(of: store.settings.routingPreset) { _, _ in store.save() }
-            Text(store.settings.routingPreset.subtitle)
+            Text(loc(store.settings.routingPreset.subtitle))
                 .font(.caption).foregroundStyle(.secondary)
 
             Toggle(loc("Block ads & trackers"), isOn: $store.settings.blockAds)
                 .onChange(of: store.settings.blockAds) { _, _ in store.save() }
+        } header: {
+            Text(loc("Mode"))
+        } footer: {
+            Text(loc("Your own rules below run under every preset, after the LAN bypass and before the preset's country rules."))
+                .font(.caption2)
         }
+    }
+
+    // MARK: - Rules
+
+    private var rulesSection: some View {
+        @Bindable var store = store
+        return Section {
+            if store.settings.customRules.isEmpty {
+                emptyRules
+            }
+            ForEach($store.settings.customRules) { $rule in
+                RuleCard(rule: $rule,
+                         servers: store.allServers,
+                         groups: store.settings.serverGroups,
+                         onChange: { store.save() },
+                         onDelete: { id in
+                             store.settings.customRules.removeAll { $0.id == id }
+                             store.save()
+                         },
+                         onMove: { id, delta in move(id: id, by: delta) })
+            }
+
+            HStack {
+                Button {
+                    store.settings.customRules.append(RoutingRule(name: ""))
+                    store.save()
+                } label: {
+                    Label(loc("Add rule"), systemImage: "plus.circle")
+                }
+                Spacer()
+                Menu {
+                    ForEach(RuleTemplate.all) { template in
+                        Button(loc(template.title)) {
+                            store.settings.customRules.append(template.rule())
+                            store.save()
+                        }
+                    }
+                } label: {
+                    Label(loc("From template"), systemImage: "wand.and.stars")
+                }
+                .fixedSize()
+            }
+        } header: {
+            Text(loc("Rules — top to bottom, first match wins"))
+        } footer: {
+            Text(loc("A rule matches when every filled-in field matches. Domains: example.com, domain:example.com, keyword:google, geosite:netflix. IPs: 1.2.3.0/24, geoip:cn."))
+                .font(.caption2)
+        }
+    }
+
+    private var emptyRules: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(loc("No rules yet."))
+                .font(.callout)
+            Text(loc("Add one to send an application, a domain or a network through a particular server."))
+                .font(.caption).foregroundStyle(.secondary)
+            if !store.settings.useNativeTun {
+                Text(loc("Application rules need TUN mode with the native core enabled in Settings."))
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func move(id: UUID, by delta: Int) {
+        guard let index = store.settings.customRules.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let target = index + delta
+        guard target >= 0, target < store.settings.customRules.count else { return }
+        store.settings.customRules.swapAt(index, target)
+        store.save()
     }
 
     // MARK: - Geo assets
@@ -108,54 +242,18 @@ struct RoutingSheet: View {
         } header: {
             Text(loc("Rule database (geosite / geoip)"))
         } footer: {
-            Text(loc("Downloaded from GitHub. geosite matches domains, geoip matches IPs by country."))
-                .font(.caption2)
-        }
-    }
-
-    // MARK: - Custom rule editor
-
-    private var customRulesSection: some View {
-        @Bindable var store = store
-        return Section {
-            if store.settings.customRules.isEmpty {
-                Text(loc("No custom rules. Add one below."))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach($store.settings.customRules) { $rule in
-                RuleCard(rule: $rule,
-                         servers: store.allServers,
-                         groups: store.settings.serverGroups,
-                         onChange: { store.save() }, onDelete: { id in
-                    store.settings.customRules.removeAll { $0.id == id }
-                    store.save()
-                })
-            }
-            .onMove { indices, dest in
-                store.settings.customRules.move(fromOffsets: indices, toOffset: dest)
-                store.save()
-            }
-
-            Button {
-                store.settings.customRules.append(RoutingRule(name: "New rule"))
-                store.save()
-            } label: {
-                Label(loc("Add rule"), systemImage: "plus.circle")
-            }
-        } header: {
-            Text(loc("Custom rules (top to bottom, first match wins)"))
-        } footer: {
-            Text(loc("Domains: example.com, domain:example.com, geosite:category-ads-all, keyword:google. IPs: 1.2.3.0/24, geoip:cn, geoip:private."))
+            // The .dat files feed Xray. sing-box reads rule-sets instead, and
+            // fetches those itself from the tags the rules mention.
+            Text(loc("Used by the Xray core. The sing-box core downloads the matching rule-sets on its own."))
                 .font(.caption2)
         }
     }
 
     private var usesGeoInCustom: Bool {
-        store.settings.routingPreset == .custom
-            && store.settings.customRules.contains { r in
-                r.domains.contains { $0.hasPrefix("geosite:") }
-                    || r.ips.contains { $0.hasPrefix("geoip:") }
-            }
+        store.settings.customRules.contains { r in
+            r.domains.contains { $0.hasPrefix("geosite:") }
+                || r.ips.contains { $0.hasPrefix("geoip:") }
+        }
     }
 
     // MARK: - Actions
@@ -173,6 +271,39 @@ struct RoutingSheet: View {
     }
 }
 
+// MARK: - Starting points
+
+/// Rules people write over and over, pre-filled.
+struct RuleTemplate: Identifiable, Sendable {
+    var id: String { title }
+    var title: String
+    var rule: @Sendable () -> RoutingRule
+
+    static let all: [RuleTemplate] = [
+        RuleTemplate(title: "An app through a server") {
+            RoutingRule(name: "App")
+        },
+        RuleTemplate(title: "Torrents direct") {
+            RoutingRule(name: "Torrents", target: .direct,
+                        processNames: ["Transmission", "qbittorrent", "deluge"])
+        },
+        RuleTemplate(title: "Streaming through the proxy") {
+            RoutingRule(name: "Streaming", target: .proxy,
+                        domains: ["geosite:netflix", "geosite:youtube",
+                                  "geosite:disney", "geosite:spotify"])
+        },
+        RuleTemplate(title: "Block QUIC (force TLS)") {
+            var rule = RoutingRule(name: "Block QUIC", target: .block, port: "443")
+            rule.network = "udp"
+            return rule
+        },
+        RuleTemplate(title: "LAN direct") {
+            RoutingRule(name: "LAN direct", target: .direct,
+                        ips: RoutingPreset.privateCIDRs)
+        }
+    ]
+}
+
 // MARK: - Single rule editor card
 
 private struct RuleCard: View {
@@ -182,68 +313,134 @@ private struct RuleCard: View {
     var groups: [ServerGroup] = []
     var onChange: () -> Void
     var onDelete: (UUID) -> Void
+    var onMove: (UUID, Int) -> Void
+
+    @State private var pickingApps = false
+    @State private var showAdvanced = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Toggle("", isOn: $rule.enabled)
-                    .labelsHidden()
-                    .onChange(of: rule.enabled) { _, _ in onChange() }
-                TextField(loc("Rule name"), text: $rule.name)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: rule.name) { _, _ in onChange() }
-                RuleTargetPicker(target: $rule.target,
-                                 servers: servers,
-                                 groups: groups,
-                                 onChange: onChange)
-                let ruleID = rule.id
-                Button(role: .destructive) { onDelete(ruleID) } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-            }
-            matcherField(title: loc("Domains"), binding: domainsBinding)
-            matcherField(title: loc("IPs / CIDR"), binding: ipsBinding)
-            HStack {
-                Text(loc("Port")).font(.caption).foregroundStyle(.secondary)
-                TextField("443 or 1000-2000", text: $rule.port)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: rule.port) { _, _ in onChange() }
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            headerRow
+            appsRow
+            matcherRow(title: loc("Domains"),
+                       placeholder: "example.com, geosite:netflix",
+                       values: $rule.domains)
+            matcherRow(title: loc("IPs / CIDR"),
+                       placeholder: "1.2.3.0/24, geoip:cn",
+                       values: $rule.ips)
+            advanced
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
         .opacity(rule.enabled ? 1 : 0.5)
+        .sheet(isPresented: $pickingApps) {
+            ProcessPickerSheet(selection: $rule.processNames)
+        }
+        .onChange(of: rule.processNames) { _, _ in onChange() }
     }
 
-    private func matcherField(title: String, binding: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-            TextEditor(text: binding)
-                .font(.system(.caption, design: .monospaced))
-                .frame(height: 48)
-                .padding(2)
-                .overlay(RoundedRectangle(cornerRadius: 5)
-                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1))
+    private var headerRow: some View {
+        HStack(spacing: 8) {
+            Toggle("", isOn: $rule.enabled)
+                .labelsHidden()
+                .onChange(of: rule.enabled) { _, _ in onChange() }
+            TextField(loc("Rule name"), text: $rule.name)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: rule.name) { _, _ in onChange() }
+            Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
+            RuleTargetPicker(target: $rule.target,
+                             servers: servers,
+                             groups: groups,
+                             onChange: onChange)
+            let ruleID = rule.id
+            Button { onMove(ruleID, -1) } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.borderless)
+            Button { onMove(ruleID, 1) } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.borderless)
+            Button(role: .destructive) { onDelete(ruleID) } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
         }
     }
 
-    private var domainsBinding: Binding<String> {
-        Binding(
-            get: { rule.domains.joined(separator: "\n") },
-            set: { rule.domains = RuleCard.split($0); onChange() }
-        )
+    /// The part the whole feature exists for: naming applications without
+    /// having to know what their binary is called.
+    private var appsRow: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(loc("Apps")).font(.caption2).foregroundStyle(.secondary)
+            TokenChips(values: $rule.processNames,
+                       placeholder: loc("Executable name"),
+                       onChange: onChange) {
+                Button {
+                    pickingApps = true
+                } label: {
+                    Label(loc("Choose…"), systemImage: "magnifyingglass")
+                }
+                .glassButton()
+            }
+        }
     }
 
-    private var ipsBinding: Binding<String> {
-        Binding(
-            get: { rule.ips.joined(separator: "\n") },
-            set: { rule.ips = RuleCard.split($0); onChange() }
-        )
+    private func matcherRow(title: String, placeholder: String,
+                            values: Binding<[String]>) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            TokenChips(values: values, placeholder: placeholder,
+                       monospaced: true, onChange: onChange)
+        }
     }
 
-    private static func split(_ text: String) -> [String] {
-        text.split(whereSeparator: { $0.isNewline || $0 == "," })
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+    private var advanced: some View {
+        DisclosureGroup(isExpanded: $showAdvanced) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(loc("Port")).font(.caption).foregroundStyle(.secondary)
+                    TextField("443, 1000-2000", text: $rule.port)
+                        .textFieldStyle(.roundedBorder)
+                        .onChange(of: rule.port) { _, _ in onChange() }
+                    Picker(loc("Network"), selection: $rule.network) {
+                        Text(loc("Any")).tag("")
+                        Text("TCP").tag("tcp")
+                        Text("UDP").tag("udp")
+                    }
+                    .fixedSize()
+                    .onChange(of: rule.network) { _, _ in onChange() }
+                }
+                HStack {
+                    Picker(loc("Addresses are"), selection: $rule.direction) {
+                        ForEach(RuleDirection.allCases) { d in
+                            Text(loc(d.title)).tag(d)
+                        }
+                    }
+                    .fixedSize()
+                    .onChange(of: rule.direction) { _, _ in onChange() }
+                    Spacer()
+                    Toggle(loc("Invert"), isOn: $rule.invert)
+                        .toggleStyle(.checkbox)
+                        .onChange(of: rule.invert) { _, _ in onChange() }
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(loc("Protocols (sniffed)")).font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TokenChips(values: $rule.protocols,
+                               placeholder: "tls, quic, bittorrent, dns",
+                               monospaced: true, onChange: onChange)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(loc("Executable paths")).font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TokenChips(values: $rule.processPaths,
+                               placeholder: "/Applications/Foo.app/Contents/MacOS/Foo",
+                               monospaced: true, onChange: onChange)
+                }
+                if rule.needsProcessMatching {
+                    Text(loc("Application matching is enforced by the sing-box core in TUN mode. The Xray path skips these rules rather than widening them."))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 4)
+        } label: {
+            Text(loc("More")).font(.caption)
+        }
     }
 }
