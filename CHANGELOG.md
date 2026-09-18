@@ -3,6 +3,14 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-09-18
+
+### Fixed
+
+- The tunnel no longer fails to start with "detour to an empty direct outbound
+  makes no sense" when the DNS bootstrap resolver is set to `direct`. The
+  `direct` detour is now omitted, matching sing-box 1.12+ semantics.
+
 ## [1.5.0] — 2026-09-18
 
 ### Added
