@@ -7,6 +7,7 @@ struct XrayClientApp: App {
     @State private var connection = ConnectionManager()
     @State private var pinger = PingTester()
     @State private var loc = Loc()
+    @State private var control = ControlServer()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -16,12 +17,18 @@ struct XrayClientApp: App {
                 .environment(connection)
                 .environment(pinger)
                 .environment(loc)
+                .environment(control)
                 .frame(minWidth: 760, minHeight: 520)
                 .preferredColorScheme(colorScheme)
                 .environment(\.layoutDirection, loc.isRTL ? .rightToLeft : .leftToRight)
                 .onAppear {
                     loc.language = store.settings.language
                     connection.bind(store)
+                    control.onLog = { [weak connection] line in
+                        connection?.appendLog(line)
+                    }
+                    control.sync(settings: store.settings, store: store,
+                                 connection: connection)
                     appDelegate.closeToTray = store.settings.closeToTray
                     appDelegate.connection = connection
                     // Keep the login-item registration in sync with the setting.

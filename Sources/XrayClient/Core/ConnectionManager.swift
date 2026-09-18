@@ -714,7 +714,10 @@ final class ConnectionManager {
     /// Clears the in-memory log buffer (does not affect the running core).
     func clearLogs() { logs = "" }
 
-    private func appendLog(_ text: String) {
+    /// Appends a line to the log the UI shows. Anything that runs alongside
+    /// the tunnel — the bridges, the control API — reports through here, so
+    /// there is one place to look when something misbehaves.
+    func appendLog(_ text: String) {
         logs += text
         if logs.count > 20_000 {
             logs = String(logs.suffix(16_000))

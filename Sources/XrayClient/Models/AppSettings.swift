@@ -91,6 +91,12 @@ struct AppSettings: Codable, Equatable {
     var controlAPIEnabled: Bool = true
     var controlAPIPort: Int = 9090
 
+    // Veil's own control API: read and write the routing configuration from
+    // outside the app. Off by default — it can change where the machine's
+    // traffic goes, so it is turned on deliberately or not at all.
+    var veilAPIEnabled: Bool = false
+    var veilAPIPort: Int = 9091
+
     // Startup
     var autoConnectOnLaunch: Bool = false
     var launchAtLogin: Bool = false
@@ -144,6 +150,8 @@ struct AppSettings: Codable, Equatable {
         tunStack = get(.tunStack, "")
         controlAPIEnabled = get(.controlAPIEnabled, true)
         controlAPIPort = get(.controlAPIPort, 9090)
+        veilAPIEnabled = get(.veilAPIEnabled, false)
+        veilAPIPort = get(.veilAPIPort, 9091)
         autoConnectOnLaunch = get(.autoConnectOnLaunch, false)
         launchAtLogin = get(.launchAtLogin, false)
         notifyOnConnect = get(.notifyOnConnect, false)

@@ -61,6 +61,32 @@ struct SettingsSheet: View {
                     }
                 }
 
+                if store.settings.mode == .tun {
+                    Section {
+                        Toggle(loc("Let the core own the interface"),
+                               isOn: $store.settings.useNativeTun)
+                            .onChange(of: store.settings.useNativeTun) { _, _ in store.save() }
+                        Text(loc("sing-box handles the tunnel itself, which is what lets a rule match an application. Turn this off to fall back to tun2socks."))
+                            .font(.caption).foregroundStyle(.secondary)
+
+                        if store.settings.useNativeTun {
+                            Toggle(loc("Strict route"), isOn: $store.settings.tunStrictRoute)
+                                .onChange(of: store.settings.tunStrictRoute) { _, _ in store.save() }
+                            Text(loc("Stops traffic from leaving around the tunnel. Can break local network access."))
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Picker(loc("Stack"), selection: $store.settings.tunStack) {
+                                Text(loc("Automatic")).tag("")
+                                Text("system").tag("system")
+                                Text("gvisor").tag("gvisor")
+                                Text("mixed").tag("mixed")
+                            }
+                            .onChange(of: store.settings.tunStack) { _, _ in store.save() }
+                        }
+                    } header: {
+                        Text(loc("TUN"))
+                    }
+                }
+
                 Section(loc("Routing")) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -73,6 +99,8 @@ struct SettingsSheet: View {
                             .glassButton()
                     }
                 }
+
+                ControlAPISection()
 
                 Section(loc("Appearance")) {
                     Picker(loc("Theme"), selection: $store.settings.appearance) {
