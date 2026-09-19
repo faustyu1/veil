@@ -25,7 +25,16 @@ struct TunInboundSettings: Equatable {
         "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32",
         "fe80::/10", "ff00::/8"
     ]
-    var stack: String = ""      // empty = sing-box default (native since 1.15)
+    /// The stack is pinned rather than left to the core.
+    ///
+    /// sing-box 1.14 — the version `Scripts/cores.lock` pins — defaults to
+    /// `mixed`, which is a gVisor UDP stack over a *system* TCP stack. On
+    /// macOS that system half never answers a SYN: ICMP is replied to and UDP
+    /// is forwarded, so the tunnel looks healthy and the core logs nothing,
+    /// while every TCP connection hangs until it times out. gVisor handles
+    /// both halves and works. Revisit when the pinned core reaches 1.15, where
+    /// the field is deprecated and sing-tun picks the stack itself.
+    var stack: String = "gvisor"
     var udpTimeout: String = "5m"
 }
 
@@ -195,8 +204,8 @@ enum SingBoxProfileBuilder {
         if !tun.routeExcludeAddress.isEmpty {
             inbound["route_exclude_address"] = tun.routeExcludeAddress
         }
-        // `stack` is deprecated as of sing-box 1.15 (sing-tun picks its own),
-        // so it is only emitted when the user pinned one.
+        // Empty only if a caller cleared it on purpose, which hands the choice
+        // back to the core.
         if !tun.stack.isEmpty { inbound["stack"] = tun.stack }
         list.append(inbound)
         return list

@@ -3,6 +3,19 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.2] — 2026-09-19
+
+### Fixed
+
+- TUN mode carried no TCP traffic at all on a default install. The tunnel's
+  network stack was left for the core to choose, and sing-box 1.14 — the
+  version pinned in `Scripts/cores.lock` — chooses `mixed`, a gVisor UDP stack
+  over a system TCP stack whose macOS half never answers a SYN. Pings were
+  replied to, DNS resolved through the tunnel and the core logged nothing, so
+  everything read as connected while every connection hung until it timed out.
+  The tunnel now asks for `gvisor`, which handles both halves. Picking a stack
+  by hand in Settings still overrides it.
+
 ## [1.6.1] — 2026-09-19
 
 ### Fixed

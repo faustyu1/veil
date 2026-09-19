@@ -209,6 +209,37 @@ final class SingBoxProfileTests: XCTestCase {
         XCTAssertTrue((guardRule?["process_name"] as? [String] ?? []).contains("Veil"))
     }
 
+    /// The pinned core defaults to `mixed`, whose system TCP half drops every
+    /// SYN on macOS, so the tunnel has to name its stack.
+    func testTunInboundPinsTheGvisorStack() {
+        let de = reality("DE")
+        var profile = SingBoxProfile()
+        profile.servers = [de]
+        profile.defaultTarget = .server(de.id)
+        profile.tun = TunInboundSettings()
+
+        let config = SingBoxProfileBuilder.build(profile)
+        let inbounds = config["inbounds"] as! [[String: Any]]
+        let tun = inbounds.first { $0["type"] as? String == "tun" }
+        XCTAssertEqual(tun?["stack"] as? String, "gvisor")
+    }
+
+    /// "Automatic" in Settings is the empty string and must not reach the core
+    /// as one, or the default above is lost the moment a profile is assembled.
+    func testAutomaticStackAssemblesAsGvisorAndAChoiceSurvives() {
+        let de = reality("DE")
+        var input = ProfileAssembler.Input()
+        input.servers = [de]
+        input.activeServerID = de.id
+        input.includeTun = true
+
+        input.settings.tunStack = ""
+        XCTAssertEqual(ProfileAssembler.profile(input).tun?.stack, "gvisor")
+
+        input.settings.tunStack = "system"
+        XCTAssertEqual(ProfileAssembler.profile(input).tun?.stack, "system")
+    }
+
     func testNoTunMeansNoDnsHijack() {
         let de = reality("DE")
         var profile = SingBoxProfile()
