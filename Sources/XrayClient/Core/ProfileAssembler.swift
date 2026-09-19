@@ -23,6 +23,11 @@ enum ProfileAssembler {
         /// Ports of the child Xray processes fronting nodes sing-box cannot
         /// speak. Filled in by `BridgeManager`.
         var bridgePorts: [UUID: Int] = [:]
+        /// Groups the subscriptions declared, as parsed from their bodies.
+        /// Kept apart from `settings.serverGroups` because the two have
+        /// different owners: these are replaced wholesale on every refresh,
+        /// the user's own are not touched at all.
+        var subscriptionGroups: [ServerGroup] = []
         var clashSecret: String = ""
         var cacheFilePath: String = ""
     }
@@ -44,7 +49,7 @@ enum ProfileAssembler {
     // MARK: - Assembly
 
     static func profile(_ input: Input) -> SingBoxProfile {
-        let expansion = expand(input.servers, groups: input.settings.serverGroups)
+        let expansion = expand(input.servers, groups: allGroups(input))
 
         var profile = SingBoxProfile()
         profile.servers = expansion.servers
@@ -103,6 +108,16 @@ enum ProfileAssembler {
         if groups.contains(where: { $0.id == id }) { return .group(id) }
         if servers.contains(where: { $0.id == id }) { return .server(id) }
         return .direct
+    }
+
+    /// The user's groups and the panels' groups as one list.
+    ///
+    /// A collision can only happen if a stored group was built from a panel's
+    /// in the first place, and the user's copy is the one they edited.
+    static func allGroups(_ input: Input) -> [ServerGroup] {
+        let own = input.settings.serverGroups
+        let ids = Set(own.map(\.id))
+        return own + input.subscriptionGroups.filter { !ids.contains($0.id) }
     }
 
     /// Flattens balancer entries into real nodes plus a group over them.

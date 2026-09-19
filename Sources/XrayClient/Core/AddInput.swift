@@ -2,8 +2,9 @@ import Foundation
 
 /// What the user just pasted, scanned or picked.
 enum AddInput: Equatable {
-    /// One or more share links, or a wg-quick profile — nothing to fetch.
-    case servers([ProxyConfig])
+    /// One or more share links, a wg-quick profile or a whole config body —
+    /// nothing to fetch. A config body brings the groups it declared with it.
+    case servers([ProxyConfig], groups: [ServerGroup] = [])
     /// A subscription URL that still has to be downloaded.
     case subscription(String)
     case unrecognized
@@ -29,8 +30,10 @@ enum AddInputClassifier {
 
         // Share links, one per line — or a whole base64-wrapped subscription
         // body, which some users paste instead of the URL.
-        let servers = BalancerGrouper.group(SubscriptionFetcher.decode(trimmed))
-        if !servers.isEmpty { return .servers(servers) }
+        let payload = BalancerGrouper.applied(to: SubscriptionPayloadParser.parse(trimmed))
+        if !payload.servers.isEmpty {
+            return .servers(payload.servers, groups: payload.groups)
+        }
 
         // A subscription URL, plain…
         if let url = subscriptionURL(trimmed) { return .subscription(url) }

@@ -78,7 +78,7 @@ struct AddServerSheet: View {
     @ViewBuilder
     private var detectionLine: some View {
         switch input {
-        case .servers(let servers):
+        case .servers(let servers, _):
             // Never interpolate a count into a translated noun — plural forms
             // differ per language. "Label: N" reads correctly everywhere.
             Label(servers.count == 1
@@ -123,8 +123,8 @@ struct AddServerSheet: View {
     private func commit() async {
         errorMessage = nil
         switch input {
-        case .servers(let servers):
-            store.addManualServers(servers)
+        case .servers(let servers, let groups):
+            store.addManualServers(servers, groups: groups)
             dismiss()
 
         case .subscription(let url):

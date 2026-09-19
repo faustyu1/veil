@@ -11,7 +11,7 @@ final class AddInputTests: XCTestCase {
         + "&type=tcp&flow=xtls-rprx-vision#NL"
 
     func testSingleShareLink() {
-        guard case .servers(let servers) = AddInputClassifier.classify(vless) else {
+        guard case .servers(let servers, _) = AddInputClassifier.classify(vless) else {
             return XCTFail("expected servers")
         }
         XCTAssertEqual(servers.count, 1)
@@ -24,7 +24,7 @@ final class AddInputTests: XCTestCase {
         trojan://pw@us.example.com:443?security=tls#US
         ss://YWVzLTI1Ni1nY206aHVudGVyMg@jp.example.com:8388#JP
         """
-        guard case .servers(let servers) = AddInputClassifier.classify(text) else {
+        guard case .servers(let servers, _) = AddInputClassifier.classify(text) else {
             return XCTFail("expected servers")
         }
         XCTAssertEqual(servers.count, 3)
@@ -44,7 +44,7 @@ final class AddInputTests: XCTestCase {
         \(vless.replacingOccurrences(of: "#NL", with: "#NL-02"))
         \(vless.replacingOccurrences(of: "#NL", with: "#NL-03"))
         """
-        guard case .servers(let servers) = AddInputClassifier.classify(text) else {
+        guard case .servers(let servers, _) = AddInputClassifier.classify(text) else {
             return XCTFail("expected servers")
         }
         XCTAssertEqual(servers.count, 1)
@@ -69,7 +69,7 @@ final class AddInputTests: XCTestCase {
     func testBase64SubscriptionBodyBecomesServers() {
         let body = Data("\(vless)\ntrojan://pw@us.example.com:443#US".utf8)
             .base64EncodedString()
-        guard case .servers(let servers) = AddInputClassifier.classify(body) else {
+        guard case .servers(let servers, _) = AddInputClassifier.classify(body) else {
             return XCTFail("expected servers")
         }
         XCTAssertEqual(servers.count, 2)
@@ -86,7 +86,7 @@ final class AddInputTests: XCTestCase {
         PublicKey = cHVibGlj
         Endpoint = wg.example.com:51820
         """
-        guard case .servers(let servers) = AddInputClassifier.classify(conf) else {
+        guard case .servers(let servers, _) = AddInputClassifier.classify(conf) else {
             return XCTFail("expected servers")
         }
         XCTAssertEqual(servers.count, 1)

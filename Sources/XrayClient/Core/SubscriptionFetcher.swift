@@ -86,12 +86,12 @@ enum SubscriptionFetcher {
             throw FetchError.undecodableBody
         }
 
-        var payload = SubscriptionPayloadParser.parse(body)
-        payload.servers = BalancerGrouper.group(payload.servers)
+        let payload = BalancerGrouper.applied(to: SubscriptionPayloadParser.parse(body))
 
         log.info("""
             subscription decoded format=\(payload.format.rawValue, privacy: .public) \
             servers=\(payload.servers.count, privacy: .public) \
+            groups=\(payload.groups.count, privacy: .public) \
             hwid-status=\(metadata.hwidStatus.rawValue, privacy: .public)
             """)
 
