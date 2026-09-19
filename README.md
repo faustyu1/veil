@@ -47,8 +47,9 @@ never asks for your password twice.
 
 ## Install
 
-Download `Veil.app.zip` from the [latest release](https://github.com/faustyu1/veil/releases/latest),
-unzip it, and move **Veil.app** to `/Applications`.
+Download `Veil.app.zip` on Apple Silicon or `Veil-x86_64.app.zip` on an Intel Mac from
+the [latest release](https://github.com/faustyu1/veil/releases/latest), unzip it, and move
+**Veil.app** to `/Applications`.
 
 The app is ad-hoc signed, so on first launch right-click → **Open**, or allow it under
 **System Settings → Privacy & Security**.

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Downloads the Xray-core binary for macOS into Sources/XrayClient/Resources/.
-# Detects CPU architecture (arm64 / x86_64) automatically.
+# Detects CPU architecture (arm64 / x86_64) automatically; TARGET_ARCH
+# overrides the detection so the Intel release can be cross-packaged on an
+# arm64 runner.
 set -euo pipefail
 
 # shellcheck source=Scripts/core-lock.sh
@@ -10,7 +12,7 @@ REPO="XTLS/Xray-core"
 DEST_DIR="$(cd "$(dirname "$0")/.." && pwd)/Sources/XrayClient/Resources"
 mkdir -p "$DEST_DIR"
 
-ARCH="$(uname -m)"
+ARCH="${TARGET_ARCH:-$(uname -m)}"
 case "$ARCH" in
   arm64)  ASSET="Xray-macos-arm64-v8a.zip" ;;
   x86_64) ASSET="Xray-macos-64.zip" ;;

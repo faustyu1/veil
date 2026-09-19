@@ -1,24 +1,38 @@
 #!/usr/bin/env bash
 # Builds Veil and packages it into a macOS .app bundle, then zips it.
 # Unlike run-app.sh this does not launch the app — it is meant for CI/release.
-# Usage: Scripts/package-app.sh [version]
+# Usage: Scripts/package-app.sh [version] [arch]
+# Without [arch] the build is native; pass x86_64 on an Apple Silicon runner
+# to produce the Intel zip. The x86_64 archive is named Veil-x86_64.app.zip so
+# it cannot be confused with the Apple Silicon Veil.app.zip.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
 
 VERSION="${1:-$(cat "${ROOT}/VERSION")}"
+ARCH="${2:-}"
 CONFIG="release"
 BUILD_NAME="XrayClient"      # SPM product (binary) name
 APP_NAME="Veil"             # user-facing app + bundle name
 APP_DIR="${ROOT}/${APP_NAME}.app"
 DIST_DIR="${ROOT}/dist"
-ZIP_PATH="${DIST_DIR}/${APP_NAME}.app.zip"
+ZIP_SUFFIX=""
+if [ -n "${ARCH}" ] && [ "${ARCH}" != "$(uname -m)" ]; then
+  ZIP_SUFFIX="-${ARCH}"
+fi
+ZIP_PATH="${DIST_DIR}/${APP_NAME}${ZIP_SUFFIX}.app.zip"
 
-echo "Building (${CONFIG})..."
-swift build -c "${CONFIG}"
+# Always non-empty (`-c` is in it), so the array expands safely under `set -u`.
+SWIFT_ARGS=(-c "${CONFIG}")
+if [ -n "${ARCH}" ]; then
+  SWIFT_ARGS+=(--arch "${ARCH}")
+fi
 
-BIN_PATH="$(swift build -c "${CONFIG}" --show-bin-path)"
+echo "Building (${CONFIG}${ARCH:+, ${ARCH}})..."
+swift build "${SWIFT_ARGS[@]}"
+
+BIN_PATH="$(swift build "${SWIFT_ARGS[@]}" --show-bin-path)"
 
 MIN_MACOS="14.0"
 

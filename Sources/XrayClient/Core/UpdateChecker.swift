@@ -8,9 +8,9 @@ import Observation
 ///
 /// Veil ships outside the App Store and is signed ad-hoc, so there is no
 /// developer ID to hang Sparkle's EdDSA appcast off. The releases API is the
-/// distribution channel that already exists — the tag, the notes and the
-/// `Veil.app.zip` asset are all published by `release.yml` — so this reads that
-/// directly rather than adding a second one that could drift out of sync.
+/// distribution channel that already exists — the tag, the notes and the app
+/// archive are all published by `release.yml` — so this reads that directly
+/// rather than adding a second one that could drift out of sync.
 @MainActor
 @Observable
 final class UpdateChecker {
@@ -18,8 +18,15 @@ final class UpdateChecker {
     /// `owner/repo` the releases are published from.
     nonisolated static let repository = "faustyu1/veil"
 
-    /// The asset `release.yml` attaches to every tag.
+    /// The asset `release.yml` attaches to every tag. The Intel archive carries
+    /// its architecture in the name, and the updater has to fetch the build it
+    /// can actually run: installing the arm64 app on an Intel Mac produces
+    /// "this application is not supported on this Mac" on the next launch.
+    #if arch(x86_64)
+    nonisolated static let assetName = "Veil-x86_64.app.zip"
+    #else
     nonisolated static let assetName = "Veil.app.zip"
+    #endif
 
     /// Every published release, newest first — the changelog as it is actually
     /// maintained, since `release.yml` fills each release body from CHANGELOG.md.

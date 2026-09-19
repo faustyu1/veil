@@ -28,8 +28,9 @@ packaged as `Veil.app` (executable renamed to `Veil`, bundle id `dev.local.veil`
 `run-app.sh` builds a bundle macOS will show. The app is called **Veil** everywhere
 user-facing.
 
-`Scripts/package-app.sh [version]` is the CI equivalent: no `open`, takes a version argument,
-zips to `dist/Veil.app.zip`.
+`Scripts/package-app.sh [version] [arch]` is the CI equivalent: no `open`, takes a version
+argument and an optional architecture. `x86_64` cross-builds the Intel archive and names it
+`dist/Veil-x86_64.app.zip` so it cannot be confused with the Apple Silicon `dist/Veil.app.zip`.
 
 ## Architecture
 
@@ -118,7 +119,9 @@ service in the order — otherwise it configures a serial or USB device.
 ### Cores are pinned
 
 `Scripts/cores.lock` records version + SHA-256 per architecture. Re-record with
-`RECORD_HASHES=1 Scripts/fetch-xray.sh`. After bumping a core, **smoke-test the real
+`RECORD_HASHES=1 Scripts/fetch-xray.sh`; the release pipeline cross-builds the Intel zip on an
+Apple Silicon runner with `TARGET_ARCH=x86_64 Scripts/fetch-*.sh`, so every core needs both an
+`arm64` and an `x86_64` line. After bumping a core, **smoke-test the real
 invocation**: tun2socks 2.7 switched to POSIX flags, read `-device` as `-d evice`, and exited
 with a usage message — shipping a TUN mode that never came up.
 

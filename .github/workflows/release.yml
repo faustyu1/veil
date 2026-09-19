@@ -15,6 +15,8 @@ jobs:
     # enables the modern Liquid Glass / Tahoe look — an app built against the
     # macOS 15 SDK renders in legacy style even when run on macOS 26+.
     runs-on: macos-26
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,3 +85,34 @@ jobs:
           body_path: release-notes.md
           generate_release_notes: true
           files: dist/Veil.app.zip
+
+  # The default archive is arm64-only (macos-26 runners are Apple Silicon), so
+  # an Intel Mac refuses to open it with "not supported on this Mac". Cross-build
+  # a second app with Intel cores and attach it to the same release. It runs
+  # after `release` so the two jobs do not race to create the release.
+  release-intel:
+    name: Build Veil.app for Intel
+    needs: release
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26.5 (Swift 6.3.2)
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+
+      - name: Fetch core binaries (x86_64)
+        env:
+          TARGET_ARCH: x86_64
+        run: |
+          Scripts/fetch-xray.sh
+          Scripts/fetch-singbox.sh
+          Scripts/fetch-tun2socks.sh
+
+      - name: Build & package Veil.app (x86_64)
+        run: Scripts/package-app.sh "${{ needs.release.outputs.version }}" x86_64
+
+      - name: Publish Intel build
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/Veil-x86_64.app.zip

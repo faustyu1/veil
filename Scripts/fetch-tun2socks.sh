@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Downloads the xjasonlyu/tun2socks binary for macOS arm64 into
+# Downloads the xjasonlyu/tun2socks binary for macOS into
 # Sources/XrayClient/Resources/. Used for the TUN (full-traffic) mode.
+# TARGET_ARCH overrides the detected architecture for cross-packaging.
 set -euo pipefail
 
 # shellcheck source=Scripts/core-lock.sh
@@ -10,7 +11,7 @@ REPO="xjasonlyu/tun2socks"
 DEST_DIR="$(cd "$(dirname "$0")/.." && pwd)/Sources/XrayClient/Resources"
 mkdir -p "${DEST_DIR}"
 
-ARCH="$(uname -m)"
+ARCH="${TARGET_ARCH:-$(uname -m)}"
 case "${ARCH}" in
   arm64)  ASSET="tun2socks-darwin-arm64.zip" ;;
   x86_64) ASSET="tun2socks-darwin-amd64.zip" ;;

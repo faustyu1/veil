@@ -46,8 +46,9 @@ v2RayTun: профили подписок, подключение в один к
 
 ## Установка
 
-Скачайте `Veil.app.zip` из [последнего релиза](https://github.com/faustyu1/veil/releases/latest),
-распакуйте и перенесите **Veil.app** в `/Applications`.
+Скачайте `Veil.app.zip` для Apple Silicon или `Veil-x86_64.app.zip` для Intel Mac из
+[последнего релиза](https://github.com/faustyu1/veil/releases/latest), распакуйте и
+перенесите **Veil.app** в `/Applications`.
 
 Приложение подписано ad-hoc, поэтому при первом запуске нажмите правой кнопкой → **Открыть**
 или разрешите запуск в **Системных настройках → Конфиденциальность и безопасность**.

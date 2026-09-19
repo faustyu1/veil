@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Downloads the sing-box binary for macOS into Sources/XrayClient/Resources/.
 # sing-box is the second core, handling QUIC-based protocols that Xray-core
-# cannot (Hysteria2, TUIC). Detects CPU architecture (arm64 / x86_64).
+# cannot (Hysteria2, TUIC). Detects CPU architecture (arm64 / x86_64);
+# TARGET_ARCH overrides the detection for cross-packaging.
 set -euo pipefail
 
 # shellcheck source=Scripts/core-lock.sh
@@ -11,7 +12,7 @@ REPO="SagerNet/sing-box"
 DEST_DIR="$(cd "$(dirname "$0")/.." && pwd)/Sources/XrayClient/Resources"
 mkdir -p "${DEST_DIR}"
 
-ARCH="$(uname -m)"
+ARCH="${TARGET_ARCH:-$(uname -m)}"
 case "${ARCH}" in
   arm64)  GOARCH="arm64" ;;
   x86_64) GOARCH="amd64" ;;
