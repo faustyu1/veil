@@ -16,6 +16,9 @@ struct ContentView: View {
     /// IDs selected for multi-delete in the Manual group.
     @State private var selectedForDeletion: Set<UUID> = []
     @State private var selectionMode = false
+    /// True when a helper is installed but pinned to a different build of Veil.
+    @State private var helperStale = false
+    @State private var helperBusy = false
 
     /// True when the active tunnel is TUN — ping probes need host-routes then.
     private var tunActive: Bool {
@@ -91,6 +94,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            staleHelperBanner
             searchBar
             serverList
             if showLog {
@@ -104,6 +108,64 @@ struct ContentView: View {
         // Measure once on the first appearance, so the list carries latencies
         // without the user having to know a Test Ping button exists.
         .task { pingAllIfUntested() }
+        .task { await refreshHelperStaleness() }
+    }
+
+    // MARK: - Stale helper
+
+    /// Says so when the helper refuses this build, and offers the one fix.
+    ///
+    /// The helper pins its client by ad-hoc code hash, which changes with every
+    /// build — including the one an in-app update installs. TUN then cannot
+    /// start at all, and the only clue is a connection that never comes up, so
+    /// this cannot wait for the user to open Settings and read the helper row.
+    @ViewBuilder
+    private var staleHelperBanner: some View {
+        if helperStale, store.settings.mode == .tun {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.shield.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(loc("Helper needs reinstalling"))
+                        .font(.callout)
+                    Text(loc("The installed helper was pinned to an older build of Veil and refuses this one, so TUN cannot start."))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                if helperBusy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button(loc("Reinstall")) { reinstallHelper() }
+                        .glassProminentButton()
+                        .controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.orange.opacity(0.12))
+            Divider()
+        }
+    }
+
+    private func refreshHelperStaleness() async {
+        // Both calls block on an XPC round trip, so they stay off the main
+        // thread — this runs while the window is drawing itself.
+        helperStale = await Task.detached(priority: .utility) {
+            !TunManager.isHelperInstalled && PrivilegedHelper.isInstalled
+        }.value
+    }
+
+    private func reinstallHelper() {
+        helperBusy = true
+        Task.detached(priority: .userInitiated) {
+            try? TunManager.installHelper()
+            let stale = !TunManager.isHelperInstalled && PrivilegedHelper.isInstalled
+            await MainActor.run {
+                helperStale = stale
+                helperBusy = false
+            }
+        }
     }
 
     // MARK: - Search & filter

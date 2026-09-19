@@ -55,6 +55,20 @@ struct AppSettings: Codable, Equatable {
     var language: AppLanguage = .system
     var autoUpdateSubscriptions: Bool = true
     var autoUpdateIntervalHours: Int = 12
+
+    /// Intervals offered for `autoUpdateIntervalHours`, in hours.
+    ///
+    /// A list beats the stepper this replaced: the old control moved one hour
+    /// at a time between 1 and 168, so reaching a day meant twenty-four hits on
+    /// an arrow a few pixels tall. `current` is folded in so a value an earlier
+    /// build stored — or one set from the control API — is still selectable
+    /// rather than being snapped to the nearest preset the first time Settings
+    /// is opened.
+    static func autoUpdateIntervalChoices(including current: Int) -> [Int] {
+        let presets = [1, 3, 6, 12, 24, 48, 168]
+        guard current > 0, !presets.contains(current) else { return presets }
+        return (presets + [current]).sorted()
+    }
     var closeToTray: Bool = true            // red button hides to menu bar
     var socksPort: Int = 10808
     var httpPort: Int = 10809

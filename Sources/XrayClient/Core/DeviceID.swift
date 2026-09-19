@@ -79,6 +79,30 @@ enum DeviceID {
         return minted
     }
 
+    /// What a pasted identifier becomes, or nil when there is nothing in it.
+    ///
+    /// Deliberately not folded through `shortened()`: a value typed in by hand
+    /// came from the provider, and rewriting it into Veil's own 16-hex form
+    /// would present the panel something other than what it issued. Trimming is
+    /// the one liberty taken — pasted text arrives with a newline on it, and a
+    /// stray space in `X-Hwid` is a rejected request.
+    static func normalizedManual(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Adopts an identifier the user supplied. Pass a subscription id to set it
+    /// for that subscription alone. Returns what was stored, or nil when the
+    /// value was blank and nothing changed.
+    @discardableResult
+    static func setManual(_ raw: String, for subscriptionID: UUID? = nil) -> String? {
+        guard let value = normalizedManual(raw) else { return nil }
+        let account = account(for: subscriptionID)
+        write(value, account: account)
+        cache.set(value, for: account)
+        return value
+    }
+
     /// Drops a subscription's own identifier; it falls back to the default.
     static func clearOverride(for subscriptionID: UUID) {
         let account = account(for: subscriptionID)
