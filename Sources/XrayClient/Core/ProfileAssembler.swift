@@ -69,7 +69,10 @@ enum ProfileAssembler {
             var tun = TunInboundSettings()
             tun.mtu = input.settings.tunnelMTU > 0 ? input.settings.tunnelMTU : 9000
             tun.strictRoute = input.settings.tunStrictRoute
-            tun.stack = input.settings.tunStack
+            // "Automatic" in Settings is an empty string, and it means the
+            // stack this build knows to be good, not whatever the core would
+            // pick. Only a stack the user chose by hand overrides it.
+            if !input.settings.tunStack.isEmpty { tun.stack = input.settings.tunStack }
             if !input.settings.ipv6Enabled {
                 tun.address = tun.address.filter { !$0.contains(":") }
             }
