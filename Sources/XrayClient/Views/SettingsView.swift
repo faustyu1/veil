@@ -32,17 +32,38 @@ struct SettingsView: View {
 
     /// Sections, one per toolbar tab. A single scrolling form of everything is
     /// what made this window taller than the screen in the first place.
-    private enum Tab: String, CaseIterable, Identifiable {
-        case general, tunnel, routing, subscriptions, advanced
+    enum Pane: String, CaseIterable, Identifiable {
+        case general, tunnel, subscriptions, advanced
+        case rules, lists, groups, dns, database
+
         var id: String { rawValue }
+
+        /// The routing pane this stands for, when it is one. Routing used to
+        /// be a window of its own reached from a button in here, which meant
+        /// two windows, two tab strips and a settings tab whose only content
+        /// was a link to the other window.
+        var routing: RoutingSheet.Tab? {
+            switch self {
+            case .rules:    return .rules
+            case .lists:    return .lists
+            case .groups:   return .groups
+            case .dns:      return .dns
+            case .database: return .database
+            default:        return nil
+            }
+        }
 
         var title: String {
             switch self {
             case .general:       return "General"
             case .tunnel:        return "Tunnel"
-            case .routing:       return "Routing"
             case .subscriptions: return "Subscriptions"
             case .advanced:      return "Advanced"
+            case .rules:         return "Rules"
+            case .lists:         return "Lists"
+            case .groups:        return "Groups"
+            case .dns:           return "DNS"
+            case .database:      return "Database"
             }
         }
 
@@ -50,52 +71,79 @@ struct SettingsView: View {
             switch self {
             case .general:       return "gearshape"
             case .tunnel:        return "shield.lefthalf.filled"
-            case .routing:       return "arrow.triangle.branch"
             case .subscriptions: return "arrow.down.circle"
             case .advanced:      return "wrench.and.screwdriver"
+            case .rules:         return "arrow.triangle.branch"
+            case .lists:         return "list.bullet.rectangle"
+            case .groups:        return "square.stack.3d.up"
+            case .dns:           return "globe"
+            case .database:      return "externaldrive"
             }
         }
+
+        static let app: [Pane] = [.general, .tunnel, .subscriptions, .advanced]
+        static let routingPanes: [Pane] = [.rules, .lists, .groups, .dns, .database]
     }
 
-    @State private var tab: Tab = .general
+    @State private var pane: Pane = .general
 
     var body: some View {
-        // No NavigationStack: it gives the window a large title on a row of
-        // its own and pushes the tab switcher below it. A plain view with a
-        // toolbar keeps the switcher on the titlebar line.
-        form(for: tab)
-            .frame(minWidth: 560, idealWidth: 620,
-                   minHeight: 440, idealHeight: 640)
-            .windowTitle(loc("Settings"))
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Picker("", selection: $tab) {
-                        ForEach(Tab.allCases) { item in
-                            Label(loc(item.title), systemImage: item.icon)
-                                .tag(item)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+        // A sidebar rather than a strip of tabs: nine panes do not fit on a
+        // titlebar, and the routing ones used to live in a second window
+        // reached by a button, which is one window and one tab strip more than
+        // the settings of one app need.
+        NavigationSplitView {
+            List(selection: $pane) {
+                Section {
+                    ForEach(Pane.app) { item in row(item) }
+                }
+                Section(loc("Routing")) {
+                    ForEach(Pane.routingPanes) { item in row(item) }
                 }
             }
-            .task { await refreshHelperStatus() }
+            .navigationSplitViewColumnWidth(min: 168, ideal: 184, max: 220)
+        } detail: {
+            detail
+                .navigationTitle(loc(pane.title))
+        }
+        .frame(minWidth: 740, idealWidth: 860,
+               minHeight: 460, idealHeight: 660)
+        .windowTitle(loc("Settings"))
+        .onAppear(perform: restorePane)
+        .task { await refreshHelperStatus() }
+    }
+
+    private func row(_ item: Pane) -> some View {
+        Label(loc(item.title), systemImage: item.icon).tag(item)
+    }
+
+    /// Opening the settings from a group's row should land on the groups. The
+    /// pane is remembered in the same setting the routing window used.
+    private func restorePane() {
+        guard let stored = RoutingSheet.Tab(rawValue: store.settings.lastRoutingTab),
+              let match = Pane.routingPanes.first(where: { $0.routing == stored })
+        else { return }
+        pane = match
+        store.settings.lastRoutingTab = RoutingSheet.Tab.rules.rawValue
+        store.save()
     }
 
     @ViewBuilder
-    private func form(for tab: Tab) -> some View {
-        Form {
-            switch tab {
-            case .general:       generalSections
-            case .tunnel:        tunnelSections
-            case .routing:       routingSections
-            case .subscriptions: subscriptionSections
-            case .advanced:      advancedSections
+    private var detail: some View {
+        if let routing = pane.routing {
+            RoutingSheet(pane: routing)
+        } else {
+            Form {
+                switch pane {
+                case .general:       generalSections
+                case .tunnel:        tunnelSections
+                case .subscriptions: subscriptionSections
+                default:             advancedSections
+                }
             }
+            .formStyle(.grouped)
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .formStyle(.grouped)
-        .scrollBounceBehavior(.basedOnSize)
     }
 
     // MARK: - General
@@ -119,6 +167,18 @@ struct SettingsView: View {
             .onChange(of: store.settings.language) { _, newLang in
                 loc.language = newLang; store.save()
             }
+        }
+
+        Section(loc("Server list")) {
+            Toggle(isOn: $store.settings.autoTags) {
+                HintLabel(loc("Tag servers from their names"), loc("Reads the country, the protocol and words a provider uses — Premium, Trial, Game — out of each node's name and shows them as tags beside the ones you attach yourself. They also filter and group. Off by default, because they are guesses about someone else's naming."))
+            }
+            .onChange(of: store.settings.autoTags) { _, _ in store.save() }
+
+            Toggle(isOn: $store.settings.showSourcesTab) {
+                HintLabel(loc("Show the Sources tab"), loc("The page that says where the servers came from, what each source returned and what it could not use. Hide it once your subscriptions are set up; everything on it stays available here."))
+            }
+            .onChange(of: store.settings.showSourcesTab) { _, _ in store.save() }
         }
 
         Section(loc("Window")) {
@@ -177,8 +237,10 @@ struct SettingsView: View {
         @Bindable var store = store
 
         Section(loc("Mode")) {
-            Picker(loc("Mode"), selection: $store.settings.mode) {
+            Picker(selection: $store.settings.mode) {
                 ForEach(TunnelMode.allCases) { m in Text(loc(m.title)).tag(m) }
+            } label: {
+                HintLabel(loc("Mode"), loc("System Proxy points macOS at Veil's local ports, so only apps that read the system proxy are routed — Telegram, the terminal and anything over UDP are not. TUN takes over a network interface instead, and everything on this Mac goes through it."))
             }
             .onChange(of: store.settings.mode) { _, m in
                 connection.mode = m; store.save()
@@ -200,11 +262,13 @@ struct SettingsView: View {
                         .onChange(of: store.settings.tunStrictRoute) { _, _ in store.save() }
                     Text(loc("Stops traffic from leaving around the tunnel. Can break local network access."))
                         .font(.caption2).foregroundStyle(.secondary)
-                    Picker(loc("Stack"), selection: $store.settings.tunStack) {
+                    Picker(selection: $store.settings.tunStack) {
                         Text(loc("Automatic")).tag("")
                         Text(verbatim: "system").tag("system")
                         Text(verbatim: "gvisor").tag("gvisor")
                         Text(verbatim: "mixed").tag("mixed")
+                    } label: {
+                        HintLabel(loc("Stack"), loc("How the tunnel moves packets. Leave this automatic: sing-box's mixed stack has killed every TCP connection here while the app still reported a healthy tunnel."))
                     }
                     .onChange(of: store.settings.tunStack) { _, _ in store.save() }
                 }
@@ -258,16 +322,22 @@ struct SettingsView: View {
         }
 
         Section(loc("Ports")) {
-            LabeledContent(loc("SOCKS port")) {
+            LabeledContent {
                 TextField("", value: $store.settings.socksPort, format: .number.grouping(.never))
                     .frame(width: 80).multilineTextAlignment(.trailing)
+            } label: {
+                HintLabel(loc("SOCKS port"), loc("The port the core listens on. Change it only if another program on this Mac already holds it."))
             }
-            LabeledContent(loc("HTTP port")) {
+            LabeledContent {
                 TextField("", value: $store.settings.httpPort, format: .number.grouping(.never))
                     .frame(width: 80).multilineTextAlignment(.trailing)
+            } label: {
+                HintLabel(loc("HTTP port"), loc("The port proxy-aware apps are pointed at in System Proxy mode."))
             }
-            Picker(loc("Log level"), selection: $store.settings.logLevel) {
+            Picker(selection: $store.settings.logLevel) {
                 ForEach(LogLevel.allCases) { l in Text(loc(l.title)).tag(l) }
+            } label: {
+                HintLabel(loc("Log level"), loc("How much the core writes to the log. Debug is for chasing a problem and is very noisy; warning is enough day to day."))
             }
             .onChange(of: store.settings.logLevel) { _, l in
                 connection.logLevel = l; store.save()
@@ -283,30 +353,6 @@ struct SettingsView: View {
 
     // MARK: - Routing
 
-    @ViewBuilder
-    private var routingSections: some View {
-        Section {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(loc(store.settings.routingPreset.title))
-                    Text(loc(store.settings.routingPreset.subtitle))
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Button(loc("Configure…")) { openWindow(id: WindowID.routing) }
-                    .glassButton()
-            }
-        } header: {
-            Text(loc("Routing"))
-        } footer: {
-            Text(loc("Rules, groups, the resolver and the rule lists all live in the routing window."))
-                .font(.caption2)
-        }
-
-        ControlAPISection()
-    }
-
     // MARK: - Subscriptions
 
     @ViewBuilder
@@ -314,7 +360,9 @@ struct SettingsView: View {
         @Bindable var store = store
 
         Section(loc("Updates")) {
-            Toggle(loc("Auto-update subscriptions"), isOn: $store.settings.autoUpdateSubscriptions)
+            Toggle(isOn: $store.settings.autoUpdateSubscriptions) {
+                HintLabel(loc("Auto-update subscriptions"), loc("Re-downloads every source on a timer, so nodes your provider adds or drops appear without you pressing anything."))
+            }
                 .onChange(of: store.settings.autoUpdateSubscriptions) { _, _ in store.save() }
             // Hidden rather than disabled: with the toggle off the interval
             // governs nothing, and a greyed row still reads as a setting.
@@ -397,6 +445,8 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var advancedSections: some View {
+        ControlAPISection()
+
         Section {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

@@ -39,6 +39,35 @@ struct UpdateWindow: View {
             }
         case .upToDate:
             upToDate
+        case .installFailed(let reason):
+            compact {
+                VStack(alignment: .leading, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 30)).foregroundStyle(.orange)
+                    Text(loc("Could not install the update")).font(.headline)
+                    Text(String(format: loc("Veil is still running %@."),
+                                AppVersion.current))
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(reason)
+                        .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(loc("Show Log")) {
+                        NSWorkspace.shared.selectFile(
+                            UpdateInstaller.logPath,
+                            inFileViewerRootedAtPath: "")
+                    }
+                    .glassButton()
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
+                    Button(loc("Close")) { close() }
+                        .glassProminentButton()
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(width: 380)
         case .failed(let message):
             compact {
                 VStack(alignment: .leading, spacing: 10) {
@@ -221,10 +250,21 @@ struct UpdateWindow: View {
                         ProgressView().progressViewStyle(.linear)
                     }
                     HStack {
-                        Text(byteLine(progress))
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(byteLine(progress))
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                            // A byte count that climbs says the transfer is
+                            // alive; a rate says whether it is worth waiting
+                            // for. The row is kept even while the rate is
+                            // still unknown, so the dialog does not resize a
+                            // second after it opens.
+                            Text(rateLine(progress))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                         Spacer(minLength: 16)
                         Button(loc("Cancel")) { updater.cancelDownload() }
                             .glassButton()
@@ -241,6 +281,20 @@ struct UpdateWindow: View {
         guard progress.total > 0 else { return received }
         let total = progress.total.formatted(.byteCount(style: .file))
         return String(format: loc("%@ of %@"), received, total)
+    }
+
+    /// Speed, and how much longer at that speed. Empty — but present — until
+    /// there have been enough readings to mean anything.
+    private func rateLine(_ progress: UpdateChecker.DownloadProgress) -> String {
+        guard let rate = progress.bytesPerSecond, rate > 0 else { return " " }
+        let speed = Int64(rate).formatted(.byteCount(style: .file)) + "/s"
+        guard let seconds = progress.secondsRemaining, seconds.isFinite else {
+            return speed
+        }
+        let left = Duration.seconds(max(1, Int(seconds.rounded())))
+            .formatted(.units(allowed: [.hours, .minutes, .seconds],
+                              width: .narrow, maximumUnitCount: 2))
+        return speed + " · " + String(format: loc("%@ left"), left)
     }
 
     // MARK: - Pieces

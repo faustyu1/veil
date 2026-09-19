@@ -22,6 +22,9 @@ struct Subscription: Codable, Identifiable, Equatable {
     var lastUpdated: Date?
     var autoUpdate: Bool = true
     var isCollapsed: Bool = false
+    /// Kept at the top of the list, above the sources the user did not pin.
+    /// Optional so that stores written by older builds still decode.
+    var pinned: Bool?
     var note: String?              // free-form description
 
     /// True when `url` lives in the Keychain rather than in `store.json`.
@@ -36,6 +39,10 @@ struct Subscription: Codable, Identifiable, Equatable {
     var refillDate: Date?          // when the traffic allowance is topped up
     var hwidStatus: SubscriptionMetadata.HWIDStatus?
     var lastFormat: SubscriptionPayload.Format?
+    /// What the last fetch could not use, so the sources page can say why a
+    /// server the provider lists is not in the list. Optional so that stores
+    /// written by older builds still decode.
+    var lastSkipped: [SubscriptionPayload.SkipNote]?
 
     /// Per-subscription overrides. nil means "follow the global setting".
     var sendHWID: Bool?

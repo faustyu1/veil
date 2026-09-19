@@ -24,6 +24,19 @@ struct SubscriptionPayload: Equatable {
         /// Nothing we recognise.
         case unknown
 
+        /// What to call this format in the interface.
+        var label: String {
+            switch self {
+            case .xrayJSON:    return "Xray config"
+            case .xrayBase64:  return "Xray config (base64)"
+            case .singbox:     return "sing-box config"
+            case .mihomoYAML:  return "Mihomo YAML"
+            case .links:       return "Share links"
+            case .base64Links: return "Share links (base64)"
+            case .unknown:     return "Unrecognised"
+            }
+        }
+
         /// True when the body is a whole core config rather than a node list.
         var isFullConfig: Bool {
             self == .xrayJSON || self == .xrayBase64 || self == .singbox || self == .mihomoYAML
@@ -46,6 +59,18 @@ struct SubscriptionPayload: Equatable {
     /// given. Share links carry no such thing, which is the one case where
     /// `BalancerGrouper` has to guess from the node names.
     var groups: [ServerGroup] = []
+
+    /// What the body contained that did not become a server, and why. Parsing
+    /// drops whatever it cannot use, and a node missing from the list for that
+    /// reason is otherwise indistinguishable from one that was never offered.
+    var skipped: [SkipNote] = []
+
+    /// One reason, and how many entries it accounted for.
+    struct SkipNote: Codable, Equatable {
+        /// What was skipped: an outbound type, a link scheme, or a format.
+        var label: String
+        var count: Int
+    }
 
     static func == (lhs: SubscriptionPayload, rhs: SubscriptionPayload) -> Bool {
         lhs.raw == rhs.raw && lhs.format == rhs.format
@@ -75,24 +100,76 @@ enum SubscriptionPayloadParser {
                 return fromJSON(json, raw: body, text: inner, wasBase64: true)
             }
             if inner.contains("://") {
+                let read = readLinks(inner)
                 return SubscriptionPayload(raw: body, format: .base64Links,
-                                           servers: LinkParser.parseMany(inner),
-                                           configJSON: nil)
+                                           servers: read.servers,
+                                           configJSON: nil,
+                                           skipped: read.skipped)
             }
         }
 
         if looksLikeMihomoYAML(trimmed) {
+            // Recognised, and not read: saying so is the difference between a
+            // subscription that is empty and one Veil cannot open.
             return SubscriptionPayload(raw: body, format: .mihomoYAML,
-                                       servers: [], configJSON: nil)
+                                       servers: [], configJSON: nil,
+                                       skipped: [SubscriptionPayload.SkipNote(label: "Mihomo YAML", count: 1)])
         }
 
         if trimmed.contains("://") {
+            let read = readLinks(trimmed)
             return SubscriptionPayload(raw: body, format: .links,
-                                       servers: LinkParser.parseMany(trimmed),
-                                       configJSON: nil)
+                                       servers: read.servers,
+                                       configJSON: nil,
+                                       skipped: read.skipped)
         }
 
-        return SubscriptionPayload(raw: body, format: .unknown, servers: [], configJSON: nil)
+        return SubscriptionPayload(raw: body, format: .unknown, servers: [], configJSON: nil,
+                                   skipped: [SubscriptionPayload.SkipNote(label: "Unrecognised", count: 1)])
+    }
+
+    /// Parses a list of share links, keeping a note of the lines that were not
+    /// one. A line is named by its scheme, which is the part worth reporting.
+    static func readLinks(_ text: String) -> (servers: [ProxyConfig], skipped: [SubscriptionPayload.SkipNote]) {
+        var servers: [ProxyConfig] = []
+        var skipped: [String: Int] = [:]
+        for line in text.split(whereSeparator: \.isNewline) {
+            let line = String(line).trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { continue }
+            if let server = try? LinkParser.parse(line) {
+                servers.append(server)
+            } else {
+                let scheme = line.components(separatedBy: "://").first ?? line
+                skipped[scheme.isEmpty ? "?" : String(scheme.prefix(24)), default: 0] += 1
+            }
+        }
+        return (servers, notes(skipped))
+    }
+
+
+    /// Entries a body offered that did not become a server. Structural
+    /// outbounds — `direct`, a selector, Xray's `freedom` — are not servers and
+    /// are no surprise; anything else that produced nothing is worth naming,
+    /// because from the list it is indistinguishable from a node the provider
+    /// never sent.
+    static func skipNotes(_ entries: [[String: Any]],
+                          produced servers: [ProxyConfig],
+                          typeKey: String = "type",
+                          structural: Set<String>) -> [SubscriptionPayload.SkipNote] {
+        let names = Set(servers.map(\.name))
+        var counts: [String: Int] = [:]
+        for entry in entries {
+            guard let type = entry[typeKey] as? String, !structural.contains(type) else { continue }
+            let tag = (entry["tag"] as? String) ?? type
+            guard !names.contains(tag) else { continue }
+            counts[type, default: 0] += 1
+        }
+        return notes(counts)
+    }
+
+    static func notes(_ counts: [String: Int]) -> [SubscriptionPayload.SkipNote] {
+        counts.map { SubscriptionPayload.SkipNote(label: $0.key, count: $0.value) }
+            .sorted { $0.count == $1.count ? $0.label < $1.label : $0.count > $1.count }
     }
 
     // MARK: - JSON bodies
@@ -103,20 +180,27 @@ enum SubscriptionPayloadParser {
 
         if isSingBox(json, outbounds: outbounds) {
             let endpoints = (json["endpoints"] as? [[String: Any]]) ?? []
-            let servers = singBoxServers(outbounds + endpoints)
+            let all = outbounds + endpoints
+            let servers = singBoxServers(all)
             return SubscriptionPayload(
                 raw: raw, format: .singbox,
                 servers: servers,
                 configJSON: text,
-                groups: singBoxGroups(outbounds, servers: servers))
+                groups: singBoxGroups(outbounds, servers: servers),
+                skipped: skipNotes(all, produced: servers,
+                                   structural: ["direct", "block", "dns",
+                                                "selector", "urltest"]))
         }
 
         let servers = xrayServers(outbounds)
+        let xraySkips = skipNotes(outbounds, produced: servers, typeKey: "protocol",
+                                  structural: ["freedom", "blackhole", "dns", "loopback"])
         return SubscriptionPayload(
             raw: raw, format: wasBase64 ? .xrayBase64 : .xrayJSON,
             servers: servers,
             configJSON: text,
-            groups: xrayGroups(json, outbounds: outbounds, servers: servers))
+            groups: xrayGroups(json, outbounds: outbounds, servers: servers),
+            skipped: xraySkips)
     }
 
     /// sing-box and Xray configs both have `outbounds`. They are told apart by

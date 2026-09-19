@@ -33,7 +33,8 @@ enum SubscriptionService {
                                           servers: result.servers,
                                           groups: result.payload.groups,
                                           metadata: result.metadata,
-                                          format: result.payload.format)
+                                          format: result.payload.format,
+                                          skipped: result.payload.skipped)
             return true
         } catch SubscriptionFetcher.FetchError.maxDevicesReached {
             store.mutateSubscription(id: sub.id) { $0.hwidStatus = .maxDevicesReached }

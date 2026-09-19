@@ -36,47 +36,39 @@ struct RoutingSheet: View {
         }
     }
 
-    @State private var tab: Tab = .rules
+    /// Which pane to draw. Routing used to be a window of its own with a tab
+    /// strip; it is a group of panes in the Settings sidebar now, and the
+    /// sidebar decides which one is on screen.
+    var pane: Tab
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            content
+            content(pane)
             if connection.isConnected {
                 Divider()
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.clockwise.circle")
                     Text(loc("Changes apply on the next connect or reconnect."))
+                    Spacer()
+                    Button(loc("Apply now")) { applyNow() }
+                        .controlSize(.small)
                 }
                 .font(.caption).foregroundStyle(.orange)
                 .padding(.horizontal).padding(.vertical, 7)
             }
         }
-        .frame(minWidth: 680, idealWidth: 820, maxWidth: .infinity,
-               minHeight: 440, idealHeight: 700, maxHeight: .infinity)
-        .windowTitle(loc("Routing"))
-        // A window, so the tab switcher belongs in the real titlebar rather
-        // than in a strip of view that only looks like one.
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases) { t in
-                        Label(loc(t.title), systemImage: t.icon).tag(t)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-            }
-            ToolbarItem(placement: .automatic) {
-                Button(loc("Done")) { applyAndDismiss() }
-                    .keyboardShortcut(.defaultAction)
-                    .help(loc("Apply the rules and close"))
-            }
-        }
+    }
+
+    /// Pushes the edited rules into the live connection. Without this they
+    /// reach it on the next connect, which is correct but easy to read as
+    /// "the rule did nothing".
+    private func applyNow() {
+        store.save()
+        connection.reconnectForRoutingChange()
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(_ tab: Tab) -> some View {
         @Bindable var store = store
         switch tab {
         case .rules:
@@ -92,11 +84,14 @@ struct RoutingSheet: View {
         case .groups:
             ServerGroupsEditor(groups: $store.settings.serverGroups,
                                servers: store.allServers,
+                               candidates: store.groupCandidates,
+                               sources: store.listSources,
+                               annotations: store.settings.nodeAnnotations,
                                onChange: { store.save() })
         case .dns:
             DNSEditor(dns: $store.settings.dns,
                       servers: store.allServers,
-                      groups: store.settings.serverGroups,
+                      groups: store.allGroups,
                       onChange: { store.save() })
         case .database:
             Form { geoSection }
@@ -115,8 +110,11 @@ struct RoutingSheet: View {
             .onChange(of: store.settings.routingPreset) { _, _ in store.save() }
             Text(loc(store.settings.routingPreset.subtitle))
                 .font(.caption).foregroundStyle(.secondary)
+            presetExplainer
 
-            Toggle(loc("Block ads & trackers"), isOn: $store.settings.blockAds)
+            Toggle(isOn: $store.settings.blockAds) {
+                HintLabel(loc("Block ads & trackers"), loc("Drops connections to known advertising and tracking domains before your own rules are consulted."))
+            }
                 .onChange(of: store.settings.blockAds) { _, _ in store.save() }
         } header: {
             Text(loc("Mode"))
@@ -124,6 +122,56 @@ struct RoutingSheet: View {
             Text(loc("Your own rules below run under every preset, after the LAN bypass and before the preset's country rules."))
                 .font(.caption2)
         }
+    }
+
+    /// Whether any rule names something this setup cannot build. `useNativeTun`
+    /// only costs anything in TUN mode: system-proxy always builds the full
+    /// profile.
+    private var unhonouredTargets: Bool {
+        store.settings.mode == .tun
+            && !store.settings.useNativeTun
+            && RoutingRule.needsProfile(store.settings.customRules)
+    }
+
+    /// What the chosen preset puts in front of and behind the user's own
+    /// rules. A preset that only describes itself in a sentence is a preset
+    /// whose effect has to be guessed at.
+    @ViewBuilder
+    private var presetExplainer: some View {
+        let preset = store.settings.routingPreset
+        let guards = preset.guardRules(blockAds: store.settings.blockAds)
+        let after = preset.presetRules()
+        if !guards.isEmpty || !after.isEmpty {
+            DisclosureGroup(loc("What this preset does")) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if !guards.isEmpty {
+                        Text(loc("Before your rules")).font(.caption2).foregroundStyle(.secondary)
+                        ForEach(guards) { rule in presetLine(rule) }
+                    }
+                    if !after.isEmpty {
+                        Text(loc("After your rules")).font(.caption2).foregroundStyle(.secondary)
+                        ForEach(after) { rule in presetLine(rule) }
+                    }
+                }
+                .padding(.top, 2)
+            }
+            .font(.caption)
+        }
+    }
+
+    private func presetLine(_ rule: RoutingRule) -> some View {
+        let matchers = (rule.domains + rule.ips).joined(separator: ", ")
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(loc(rule.name)).foregroundStyle(.primary)
+            Text(verbatim: "→").foregroundStyle(.secondary)
+            Text(loc(rule.target.title(servers: store.allServers,
+                                       groups: store.allGroups)))
+                .foregroundStyle(.secondary)
+            Text(verbatim: matchers)
+                .font(.caption2).monospaced().foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+        .font(.caption)
     }
 
     // MARK: - Rules
@@ -134,16 +182,24 @@ struct RoutingSheet: View {
             if store.settings.customRules.isEmpty {
                 emptyRules
             }
+            if unhonouredTargets {
+                Label(loc("These rules need sing-box's own tunnel. With it off, TUN mode has a single proxy outbound, so a rule naming a server or a group sends its traffic through the default one instead."),
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             ForEach($store.settings.customRules) { $rule in
                 RuleCard(rule: $rule,
                          servers: store.allServers,
-                         groups: store.settings.serverGroups,
+                         groups: store.allGroups,
                          onChange: { store.save() },
                          onDelete: { id in
                              store.settings.customRules.removeAll { $0.id == id }
                              store.save()
                          },
-                         onMove: { id, delta in move(id: id, by: delta) })
+                         onMove: { id, delta in move(id: id, by: delta) },
+                         targetUnreachable: unhonouredTargets && $rule.wrappedValue.target.needsProfile)
             }
 
             HStack {
@@ -269,11 +325,6 @@ struct RoutingSheet: View {
                            customGeosite: store.settings.customGeositeURL)
     }
 
-    private func applyAndDismiss() {
-        connection.routingRules = store.settings.effectiveRoutingRules
-        store.save()
-        dismiss()
-    }
 }
 
 // MARK: - Starting points
@@ -319,6 +370,9 @@ private struct RuleCard: View {
     var onChange: () -> Void
     var onDelete: (UUID) -> Void
     var onMove: (UUID, Int) -> Void
+    /// Set when the rule names a server or group this setup cannot build, so
+    /// the row says so rather than looking configured.
+    var targetUnreachable: Bool = false
 
     @State private var pickingApps = false
     @State private var showAdvanced = false
@@ -356,6 +410,11 @@ private struct RuleCard: View {
                              servers: servers,
                              groups: groups,
                              onChange: onChange)
+            if targetUnreachable {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .help(loc("This target is not built in the current setup, so the rule sends its traffic through the default proxy."))
+            }
             let ruleID = rule.id
             Button { onMove(ruleID, -1) } label: { Image(systemName: "chevron.up") }
                 .buttonStyle(.borderless)

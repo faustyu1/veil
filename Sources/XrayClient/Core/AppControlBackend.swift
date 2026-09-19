@@ -88,6 +88,48 @@ final class AppControlBackend: ControlBackend {
         }
     }
 
+    /// Where the servers came from, with the URLs left out — the path of a
+    /// subscription URL is the access token, and a caller configuring routing
+    /// never needs it.
+    func sources() -> [ControlSource] {
+        store.subscriptions.map { subscription in
+            ControlSource(id: subscription.id,
+                          name: subscription.name,
+                          serverCount: subscription.servers.count,
+                          groupCount: subscription.declaredGroups.count,
+                          lastUpdated: subscription.lastUpdated,
+                          skipped: (subscription.lastSkipped ?? []).map {
+                              ControlSkipNote(label: $0.label, count: $0.count)
+                          },
+                          hasStoredURL: subscription.hasStoredURL ?? (subscription.url != nil))
+        }
+    }
+
+    func refreshSources() {
+        let store = store
+        Task { await SubscriptionService.refreshAll(store) }
+    }
+
+    func annotations() -> [UUID: NodeAnnotation] { store.settings.nodeAnnotations }
+
+    func setAnnotations(_ annotations: [UUID: NodeAnnotation]) {
+        store.settings.nodeAnnotations = annotations
+        persist()
+    }
+
+    func log() -> String { connection.logs }
+
+    func diagnostics() -> String {
+        Diagnostics.report(store: store, logText: connection.logs)
+    }
+
+    /// What the Apply now button does: hand the edited settings to the live
+    /// connection instead of waiting for the next connect.
+    func apply() {
+        persist()
+        connection.reconnectForRoutingChange()
+    }
+
     func rules() -> [RoutingRule] { store.settings.customRules }
     /// Both the user's groups and the ones the panels declared: the API
     /// answers with the outbound graph as it is built, not with the half of it

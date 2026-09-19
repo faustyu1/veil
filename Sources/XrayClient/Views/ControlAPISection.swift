@@ -159,6 +159,16 @@ struct ControlAPISection: View {
         Rules are ordered and the first match wins. Application rules only work
         in TUN mode with the native core — GET /v1/state reports
         processRoutingAvailable.
+
+        Other things you can do:
+        - POST /v1/apply pushes an edit into a connection that is already up.
+        - GET /v1/sources says where the servers came from and what the last
+          fetch had to skip; POST /v1/sources/refresh re-downloads them.
+        - GET/PUT /v1/nodes carries the user's own labels, pins and renames.
+        - GET /v1/logs?level=warning&limit=50 is the core's log, redacted.
+
+        The API never returns a subscription URL or the device identifier, and
+        it cannot add servers. The full contract is in docs/agents.md.
         """
     }
 }

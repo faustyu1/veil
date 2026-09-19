@@ -10,6 +10,9 @@ struct XrayClientApp: App {
     @State private var control = ControlServer()
     @State private var updater = UpdateChecker()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    /// Startup needs to be able to raise the update window when the previous
+    /// install left a failure behind.
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup("Veil", id: WindowID.main) {
@@ -22,7 +25,7 @@ struct XrayClientApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
-            VeilCommands(loc: loc, updater: updater)
+            VeilCommands(loc: loc, updater: updater, store: store)
         }
 
         // Settings is a window of its own rather than a sheet: a long form no
@@ -38,14 +41,6 @@ struct XrayClientApp: App {
                                  updater: updater)
         }
         .defaultSize(width: 620, height: 640)
-
-        Window(loc("Routing"), id: WindowID.routing) {
-            RoutingSheet()
-                .veilEnvironment(store: store, connection: connection,
-                                 pinger: pinger, loc: loc, control: control,
-                                 updater: updater)
-        }
-        .defaultSize(width: 780, height: 700)
 
         Window(loc("About Veil"), id: WindowID.about) {
             AboutWindow()
@@ -110,7 +105,15 @@ struct XrayClientApp: App {
         }
         // Keep the community rule lists fresh in the background.
         Task { await CommunityListManager.shared.refreshDue(store.settings) }
-        updater.checkInBackgroundIfDue()
+        // An install runs after this process is gone, so a failed one can only
+        // be reported by the launch that follows it. Checked before the next
+        // check is scheduled, which would otherwise offer the same update
+        // again with no hint of why the last attempt did nothing.
+        if updater.reportPreviousInstall() {
+            openWindow(id: WindowID.update)
+        } else {
+            updater.checkInBackgroundIfDue()
+        }
         // Auto-connect to the last server on launch, if enabled.
         if store.settings.autoConnectOnLaunch,
            let server = store.server(withID: store.selectedServerID) {
@@ -168,6 +171,7 @@ extension View {
 private struct VeilCommands: Commands {
     let loc: Loc
     let updater: UpdateChecker
+    let store: ServerStore
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -186,8 +190,14 @@ private struct VeilCommands: Commands {
             }
         }
         CommandGroup(after: .toolbar) {
-            Button(loc("Routing…")) { openWindow(id: WindowID.routing) }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+            // Routing is a set of panes in Settings now, not a window of its
+            // own; the shortcut opens it there.
+            Button(loc("Routing…")) {
+                store.settings.lastRoutingTab = RoutingSheet.Tab.rules.rawValue
+                store.save()
+                openWindow(id: WindowID.settings)
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
         }
     }
 }

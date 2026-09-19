@@ -130,11 +130,19 @@ enum SingBoxProfileBuilder {
         outbounds.append(["type": "direct", "tag": ProfileTags.direct])
         outbounds.append(["type": "block", "tag": ProfileTags.block])
 
+        // Which outbounds this config actually declares. A rule naming a
+        // group that produced nothing — an automatic group whose query matched
+        // no node, a hand-picked one whose members are all gone — would
+        // otherwise send traffic to a tag the core has never heard of, and the
+        // core refuses to start.
+        var emitted = Set(nodeTags)
+        emitted.formUnion([ProfileTags.defaultSelector, ProfileTags.direct, ProfileTags.block])
+
         dict["inbounds"] = inbounds(profile)
         dict["outbounds"] = outbounds
         if !endpoints.isEmpty { dict["endpoints"] = endpoints }
         if profile.dns.enabled { dict["dns"] = dns(profile) }
-        dict["route"] = route(profile)
+        dict["route"] = route(profile, emitted: emitted)
         if let experimental = experimental(profile) { dict["experimental"] = experimental }
         return dict
     }
@@ -263,7 +271,8 @@ enum SingBoxProfileBuilder {
 
     // MARK: - Route
 
-    private static func route(_ profile: SingBoxProfile) -> [String: Any] {
+    private static func route(_ profile: SingBoxProfile,
+                              emitted: Set<String>? = nil) -> [String: Any] {
         var rules: [[String: Any]] = []
 
         // Sniffing has been a rule action since 1.12; doing it first is what
@@ -282,7 +291,7 @@ enum SingBoxProfileBuilder {
         }
 
         for rule in profile.rules where rule.enabled {
-            if let rendered = routeRule(rule) { rules.append(rendered) }
+            if let rendered = routeRule(rule, emitted: emitted) { rules.append(rendered) }
         }
 
         var route: [String: Any] = [
@@ -308,9 +317,16 @@ enum SingBoxProfileBuilder {
 
     /// One `RoutingRule` as a sing-box route rule, or nil when it matches
     /// nothing.
-    static func routeRule(_ rule: RoutingRule) -> [String: Any]? {
+    /// `emitted` is the set of tags this config declares. Passing it makes a
+    /// rule whose target was not built fall back to the default proxy rather
+    /// than name a tag that does not exist: the rule asked for the traffic to
+    /// be proxied, and the group it named is the part that is missing.
+    static func routeRule(_ rule: RoutingRule,
+                          emitted: Set<String>? = nil) -> [String: Any]? {
         guard rule.hasMatcher else { return nil }
-        var r: [String: Any] = ["outbound": rule.target.tag]
+        var tag = rule.target.tag
+        if let emitted, !emitted.contains(tag) { tag = ProfileTags.defaultSelector }
+        var r: [String: Any] = ["outbound": tag]
         var ruleSetTags = rule.ruleSets
 
         let domains = MatcherSyntax.domains(rule.domains)

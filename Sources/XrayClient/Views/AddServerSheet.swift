@@ -145,7 +145,8 @@ struct AddServerSheet: View {
                 store.addOrUpdateSubscription(name: name, url: url,
                                               servers: result.servers,
                                               metadata: result.metadata,
-                                              format: result.payload.format)
+                                              format: result.payload.format,
+                                              skipped: result.payload.skipped)
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription

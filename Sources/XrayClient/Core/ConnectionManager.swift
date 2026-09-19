@@ -132,11 +132,34 @@ final class ConnectionManager {
     /// switch is sub-second and never re-prompts for a password.
     func connect(to server: ProxyConfig, forceTransportRefresh: Bool = false) {
         if let store { applyStore(store) }
-        if settings.useNativeTun {
+        if ConnectionManager.usesProfile(mode: mode, useNativeTun: settings.useNativeTun) {
             connectWithProfile(to: server, forceTransportRefresh: forceTransportRefresh)
         } else {
             connectLegacy(to: server, forceTransportRefresh: forceTransportRefresh)
         }
+    }
+
+    /// Whether this setup is built from the full profile.
+    ///
+    /// `useNativeTun` governs one thing: who owns the tunnel interface. In
+    /// system-proxy mode there is no interface to own, so turning the native
+    /// inbound off there used to cost the whole outbound graph — every rule
+    /// naming a node or a group silently collapsed onto the single proxy
+    /// outbound, which is the "send this domain through the WireGuard peer"
+    /// that quietly did nothing.
+    nonisolated static func usesProfile(mode: TunnelMode, useNativeTun: Bool) -> Bool {
+        mode == .systemProxy || useNativeTun
+    }
+
+    /// Re-reads the routing out of the store and relaunches the core with it.
+    ///
+    /// Edited rules otherwise reach the connection on the next connect, which
+    /// is correct but reads as "the rule did nothing" while the old graph is
+    /// still live.
+    func reconnectForRoutingChange() {
+        guard isConnected, let store else { return }
+        applyStore(store)
+        reconnect()
     }
 
     /// Binds the store and takes a first copy of its settings.
