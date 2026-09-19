@@ -221,3 +221,27 @@ final class SubscriptionPayloadTests: XCTestCase {
         XCTAssertTrue(payload.servers.isEmpty)
     }
 }
+
+/// The auto-update interval is chosen from a list rather than nudged one hour
+/// at a time, so the list has to cover whatever is already stored.
+final class AutoUpdateIntervalTests: XCTestCase {
+
+    func testOffersUsefulIntervalsInOrder() {
+        let choices = AppSettings.autoUpdateIntervalChoices(including: 12)
+        XCTAssertEqual(choices, [1, 3, 6, 12, 24, 48, 168])
+    }
+
+    func testAStoredValueOffTheListIsKept() {
+        // An interval set by an older build's stepper must not silently jump
+        // to a neighbouring preset the moment Settings is opened.
+        let choices = AppSettings.autoUpdateIntervalChoices(including: 7)
+        XCTAssertTrue(choices.contains(7), "7 h was dropped: \(choices)")
+        XCTAssertEqual(choices, choices.sorted())
+        XCTAssertEqual(choices.count, Set(choices).count, "duplicated entry")
+    }
+
+    func testAStoredValueOnTheListIsNotDuplicated() {
+        let choices = AppSettings.autoUpdateIntervalChoices(including: 24)
+        XCTAssertEqual(choices.filter { $0 == 24 }.count, 1)
+    }
+}

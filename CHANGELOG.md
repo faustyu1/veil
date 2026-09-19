@@ -3,6 +3,32 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.3] — 2026-09-19
+
+### Fixed
+
+- The Device ID on screen did not change when it was regenerated. The row read
+  the identifier from a static store SwiftUI does not observe, so the new value
+  only appeared once something unrelated redrew the row — pressing Copy, for
+  instance, which is how it looked like copying was what rotated it.
+- Veil no longer goes quiet after it updates itself. The helper pins its client
+  by code hash and every build has a different one, so an installed update left
+  a helper that refuses the app and a TUN mode that cannot start. The main
+  window now says so and offers the reinstall, instead of leaving it to be
+  found in Settings.
+
+### Added
+
+- The Device ID can be set by hand, for providers that issue one of their own.
+  It is stored exactly as typed rather than folded into Veil's own format.
+
+### Changed
+
+- The subscription check interval is a list of useful intervals — hourly up to
+  weekly — rather than a stepper that moved one hour at a time between 1 and
+  168. An interval an earlier build stored stays selectable. The row is hidden
+  altogether while auto-update is off, since it governs nothing then.
+
 ## [1.6.2] — 2026-09-19
 
 ### Fixed

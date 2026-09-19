@@ -24,6 +24,11 @@ struct SettingsView: View {
     @State private var helperError: String?
     @State private var diagnosticsCopied = false
     @State private var hwidCopied = false
+    /// The identifier on screen. `DeviceID` is a static store SwiftUI cannot
+    /// observe, so the view keeps its own copy and updates it on every change.
+    @State private var hwid = DeviceID.hwid
+    /// What is typed into the manual field, empty unless it is being edited.
+    @State private var hwidDraft = ""
 
     /// Sections, one per toolbar tab. A single scrolling form of everything is
     /// what made this window taller than the screen in the first place.
@@ -311,10 +316,17 @@ struct SettingsView: View {
         Section(loc("Updates")) {
             Toggle(loc("Auto-update subscriptions"), isOn: $store.settings.autoUpdateSubscriptions)
                 .onChange(of: store.settings.autoUpdateSubscriptions) { _, _ in store.save() }
-            Stepper(value: $store.settings.autoUpdateIntervalHours, in: 1...168) {
-                Text(verbatim: "\(loc("Every")) \(store.settings.autoUpdateIntervalHours) \(loc("h"))")
+            // Hidden rather than disabled: with the toggle off the interval
+            // governs nothing, and a greyed row still reads as a setting.
+            if store.settings.autoUpdateSubscriptions {
+                Picker(loc("Check every"), selection: $store.settings.autoUpdateIntervalHours) {
+                    ForEach(AppSettings.autoUpdateIntervalChoices(
+                        including: store.settings.autoUpdateIntervalHours), id: \.self) { hours in
+                        Text(verbatim: "\(hours) \(loc("h"))").tag(hours)
+                    }
+                }
+                .onChange(of: store.settings.autoUpdateIntervalHours) { _, _ in store.save() }
             }
-            .onChange(of: store.settings.autoUpdateIntervalHours) { _, _ in store.save() }
         }
 
         Section {
@@ -326,24 +338,41 @@ struct SettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(loc("Device ID"))
-                    Text(verbatim: DeviceID.hwid)
+                    // Held in state rather than read from `DeviceID` on every
+                    // draw: that is a static store SwiftUI cannot observe, so
+                    // a rotated ID used to stay on screen until some unrelated
+                    // change happened to redraw the row.
+                    Text(verbatim: hwid)
                         .font(.caption.monospaced()).foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
                 Spacer()
                 Button(hwidCopied ? loc("Copied") : loc("Copy")) {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(DeviceID.hwid, forType: .string)
+                    NSPasteboard.general.setString(hwid, forType: .string)
                     hwidCopied = true
                 }
                 .glassButton()
                 Button(loc("Regenerate")) {
-                    DeviceID.regenerate()
+                    hwid = DeviceID.regenerate()
+                    hwidDraft = ""
                     hwidCopied = false
                 }
                 .glassButton()
             }
             Text(loc("A new ID looks like a new device to your provider and may use up a device slot."))
+                .font(.caption).foregroundStyle(.secondary)
+
+            HStack {
+                TextField(loc("Set the ID by hand"), text: $hwidDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption.monospaced())
+                    .onSubmit { applyManualHwid() }
+                Button(loc("Apply")) { applyManualHwid() }
+                    .glassButton()
+                    .disabled(DeviceID.normalizedManual(hwidDraft) == nil)
+            }
+            Text(loc("Use the ID your provider issued. Stored exactly as typed."))
                 .font(.caption).foregroundStyle(.secondary)
         } header: {
             Text(loc("Device"))
@@ -392,6 +421,15 @@ struct SettingsView: View {
     }
 
     // MARK: - Helper plumbing
+
+    /// Adopts whatever is in the manual field, then clears it. A blank field
+    /// is not an identifier, so the button is disabled and this does nothing.
+    private func applyManualHwid() {
+        guard let applied = DeviceID.setManual(hwidDraft) else { return }
+        hwid = applied
+        hwidDraft = ""
+        hwidCopied = false
+    }
 
     /// Runs an install or removal off the main thread — both wait on the admin
     /// prompt and on an XPC round trip, and neither may freeze the window.

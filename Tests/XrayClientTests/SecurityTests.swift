@@ -152,6 +152,28 @@ final class DeviceIdentifierTests: XCTestCase {
     // `DeviceID.regenerate()` is deliberately not exercised here: it writes the
     // real Keychain item the installed app reads, and a test that rotates a
     // user's HWID behind their back is worse than an untested one line.
+    // `setManual` is covered through `normalizedManual`, which is the whole of
+    // its decision-making and touches no storage.
+
+    func testManualIdentifierKeepsWhatThePanelIssued() {
+        // Panels hand out identifiers that are not UUID-shaped. Whatever the
+        // user pastes is what their provider expects to see, so it is taken as
+        // written rather than folded into Veil's own 16-hex form.
+        XCTAssertEqual(DeviceID.normalizedManual("device-42_abc"), "device-42_abc")
+    }
+
+    func testManualIdentifierIsTrimmed() {
+        // A pasted value almost always arrives with a newline on the end, and
+        // a stray space in an HTTP header is a rejected request.
+        XCTAssertEqual(DeviceID.normalizedManual("  E0104A37B8464E6B \n"),
+                       "E0104A37B8464E6B")
+    }
+
+    func testBlankManualIdentifierIsRefused() {
+        // Empty means "I changed my mind", not "register me as nobody".
+        XCTAssertNil(DeviceID.normalizedManual(""))
+        XCTAssertNil(DeviceID.normalizedManual("   \n "))
+    }
 }
 
 /// tun2socks answers a flag it cannot parse by printing its usage and exiting,
