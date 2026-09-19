@@ -38,10 +38,19 @@ struct SubscriptionPayload: Equatable {
     /// The config document, decoded out of any base64 wrapper — the routing,
     /// balancers and DNS the node list cannot carry.
     var configJSON: String?
+    /// The groups the panel declared, over `servers`.
+    ///
+    /// A panel that balances between nodes says so in its config: sing-box with
+    /// a `urltest` or `selector` outbound, Xray with a `routing.balancers`
+    /// entry. That is the grouping the provider intended, and it is kept as
+    /// given. Share links carry no such thing, which is the one case where
+    /// `BalancerGrouper` has to guess from the node names.
+    var groups: [ServerGroup] = []
 
     static func == (lhs: SubscriptionPayload, rhs: SubscriptionPayload) -> Bool {
         lhs.raw == rhs.raw && lhs.format == rhs.format
             && lhs.servers == rhs.servers && lhs.configJSON == rhs.configJSON
+            && lhs.groups == rhs.groups
     }
 }
 
@@ -94,16 +103,20 @@ enum SubscriptionPayloadParser {
 
         if isSingBox(json, outbounds: outbounds) {
             let endpoints = (json["endpoints"] as? [[String: Any]]) ?? []
+            let servers = singBoxServers(outbounds + endpoints)
             return SubscriptionPayload(
                 raw: raw, format: .singbox,
-                servers: singBoxServers(outbounds + endpoints),
-                configJSON: text)
+                servers: servers,
+                configJSON: text,
+                groups: singBoxGroups(outbounds, servers: servers))
         }
 
+        let servers = xrayServers(outbounds)
         return SubscriptionPayload(
             raw: raw, format: wasBase64 ? .xrayBase64 : .xrayJSON,
-            servers: xrayServers(outbounds),
-            configJSON: text)
+            servers: servers,
+            configJSON: text,
+            groups: xrayGroups(json, outbounds: outbounds, servers: servers))
     }
 
     /// sing-box and Xray configs both have `outbounds`. They are told apart by
@@ -325,6 +338,81 @@ enum SubscriptionPayloadParser {
 
     private static func defaultPort(_ proto: ProxyProtocol) -> Int {
         proto == .wireguard ? 51820 : 443
+    }
+
+    // MARK: - Declared groups
+
+    /// sing-box states its groups outright: a `urltest` or `selector` outbound
+    /// naming its members by tag.
+    static func singBoxGroups(_ outbounds: [[String: Any]],
+                              servers: [ProxyConfig]) -> [ServerGroup] {
+        let index = idsByTag(servers)
+        var result: [ServerGroup] = []
+        for outbound in outbounds {
+            guard let type = outbound["type"] as? String,
+                  type == "urltest" || type == "selector" else { continue }
+            let members = (outbound["outbounds"] as? [String] ?? [])
+                .flatMap { index[$0] ?? [] }
+            // Groups routinely list `direct`, `block` or another group among
+            // their members. Only the nodes survive, and a group with none of
+            // them left is not a group.
+            guard !members.isEmpty else { continue }
+
+            var group = ServerGroup(name: (outbound["tag"] as? String) ?? type,
+                                    kind: type == "urltest" ? .urltest : .selector,
+                                    memberIDs: members)
+            if let url = nonEmpty(outbound["url"] as? String) { group.testURL = url }
+            if let interval = nonEmpty(outbound["interval"] as? String) {
+                group.interval = interval
+            }
+            if let tolerance = intValue(outbound["tolerance"]) { group.tolerance = tolerance }
+            if let picked = outbound["default"] as? String {
+                group.selectedID = index[picked]?.first
+            }
+            group.interruptExistingConnections =
+                (outbound["interrupt_exist_connections"] as? Bool) ?? false
+            result.append(group)
+        }
+        return result
+    }
+
+    /// Xray names no members: a balancer is a list of tag prefixes matched
+    /// against the outbound list, so the membership has to be resolved here the
+    /// same way the core resolves it.
+    ///
+    /// Every strategy becomes a `urltest` group. Xray offers `random`,
+    /// `roundRobin`, `leastPing` and `leastLoad`, and Veil has one automatic
+    /// kind; what they share, and what the user cares about, is that the core
+    /// picks rather than they do. The alternative — calling a random balancer a
+    /// manual selector — would be wrong in the one way that matters.
+    static func xrayGroups(_ json: [String: Any],
+                           outbounds: [[String: Any]],
+                           servers: [ProxyConfig]) -> [ServerGroup] {
+        guard let routing = json["routing"] as? [String: Any],
+              let balancers = routing["balancers"] as? [[String: Any]] else { return [] }
+        let index = idsByTag(servers)
+        let tags = outbounds.compactMap { $0["tag"] as? String }
+
+        var result: [ServerGroup] = []
+        for balancer in balancers {
+            let selectors = (balancer["selector"] as? [String]) ?? []
+            let members = tags
+                .filter { tag in selectors.contains { tag.hasPrefix($0) } }
+                .flatMap { index[$0] ?? [] }
+            guard !members.isEmpty else { continue }
+            result.append(ServerGroup(name: (balancer["tag"] as? String) ?? "balancer",
+                                      kind: .urltest, memberIDs: members))
+        }
+        return result
+    }
+
+    /// Nodes by the tag they were built from. A list rather than a single id:
+    /// one Xray outbound tag can carry several `vnext` addresses, and each of
+    /// those became a node of its own.
+    private static func idsByTag(_ servers: [ProxyConfig]) -> [String: [UUID]] {
+        var index: [String: [UUID]] = [:]
+        for server in servers { index[server.name, default: []].append(server.id) }
+        return index
     }
 
     // MARK: - Small helpers

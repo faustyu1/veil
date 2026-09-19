@@ -3,6 +3,25 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] — 2026-09-19
+
+### Added
+
+- Balancer groups a panel declares are now used as declared. A subscription
+  that answers with a sing-box or Xray config states its grouping outright —
+  a `urltest` or `selector` outbound, a `routing.balancers` entry — and Veil
+  reads that instead of re-deriving one from the node names. Each group shows
+  up in the list as a single entry you can connect to, with its members
+  underneath.
+
+### Changed
+
+- The name heuristic that merges `NL - 1` and `NL - 2` into one balancer now
+  runs only for subscriptions that are a list of share links. Those carry no
+  grouping at all, so a guess is all there is; a config document does carry
+  one, and guessing over it replaced the provider's intent with whatever their
+  node names happened to look like.
+
 ## [1.6.3] — 2026-09-19
 
 ### Fixed

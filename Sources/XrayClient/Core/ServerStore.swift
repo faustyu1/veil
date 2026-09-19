@@ -47,9 +47,25 @@ final class ServerStore {
         subscriptions.flatMap(\.servers)
     }
 
+    /// Every group the panels declared, across all subscriptions. The user's
+    /// own groups live in `settings.serverGroups` and stay separate.
+    var declaredGroups: [ServerGroup] {
+        subscriptions.flatMap(\.declaredGroups)
+    }
+
     func server(withID id: UUID?) -> ProxyConfig? {
         guard let id else { return nil }
-        return allServers.first { $0.id == id }
+        if let server = allServers.first(where: { $0.id == id }) { return server }
+        // A group is a connectable thing too, and the id the user picked may
+        // well be one — auto-connect on launch reads the stored selection back
+        // through here.
+        guard let group = declaredGroups.first(where: { $0.id == id }) else { return nil }
+        return representative(for: group)
+    }
+
+    /// A declared group as a single entry the list can show.
+    func representative(for group: ServerGroup) -> ProxyConfig? {
+        group.representative(in: allServers)
     }
 
     func subscriptionContaining(serverID: UUID?) -> Subscription? {
@@ -65,9 +81,12 @@ final class ServerStore {
         return 0
     }
 
-    func addManualServers(_ servers: [ProxyConfig]) {
+    func addManualServers(_ servers: [ProxyConfig], groups: [ServerGroup] = []) {
         let idx = ensureManualGroup()
         subscriptions[idx].servers.append(contentsOf: servers)
+        if !groups.isEmpty {
+            subscriptions[idx].groups = subscriptions[idx].declaredGroups + groups
+        }
         save()
     }
 
@@ -95,19 +114,24 @@ final class ServerStore {
     /// response headers lands on the profile.
     func addOrUpdateSubscription(name: String, url: String,
                                  servers: [ProxyConfig],
+                                 groups: [ServerGroup] = [],
                                  metadata: SubscriptionMetadata,
                                  format: SubscriptionPayload.Format?) {
         let idx = subscriptions.firstIndex { $0.url == url }
         if let idx {
-            // Preserve UI state and identity, refresh the contents.
+            // Preserve UI state and identity, refresh the contents. The groups
+            // are replaced rather than merged: they are the panel's, they name
+            // servers by id, and the refresh just minted new ones.
             subscriptions[idx].name = name
             subscriptions[idx].servers = servers
+            subscriptions[idx].groups = groups
             subscriptions[idx].lastUpdated = Date()
             subscriptions[idx].lastFormat = format
             subscriptions[idx].apply(metadata)
         } else {
             var sub = Subscription(name: name, url: url)
             sub.servers = servers
+            sub.groups = groups
             sub.lastUpdated = Date()
             sub.lastFormat = format
             sub.apply(metadata)

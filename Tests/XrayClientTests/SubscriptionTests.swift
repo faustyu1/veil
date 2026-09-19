@@ -245,3 +245,126 @@ final class AutoUpdateIntervalTests: XCTestCase {
         XCTAssertEqual(choices.filter { $0 == 24 }.count, 1)
     }
 }
+
+/// Panels that answer with a whole core config declare their balancers in it.
+/// Veil used to drop that and re-guess the grouping from node names, which is
+/// only ever a fallback for share links — those carry no grouping at all.
+final class SubscriptionGroupTests: XCTestCase {
+
+    private func parse(_ body: String) -> SubscriptionPayload {
+        SubscriptionPayloadParser.parse(body)
+    }
+
+    private func node(_ tag: String, _ address: String) -> String {
+        """
+        {"type": "vless", "tag": "\(tag)", "server": "\(address)",
+         "server_port": 443, "uuid": "11111111-2222-3333-4444-555555555555"}
+        """
+    }
+
+    func testSingBoxUrltestBecomesAGroupOverItsMembers() {
+        let body = """
+        {"outbounds": [
+          \(node("nl-1", "1.1.1.1")),
+          \(node("nl-2", "2.2.2.2")),
+          {"type": "urltest", "tag": "NL", "outbounds": ["nl-1", "nl-2"],
+           "interval": "2m", "tolerance": 100}
+        ], "route": {"final": "NL"}}
+        """
+        let payload = parse(body)
+        XCTAssertEqual(payload.format, .singbox)
+        XCTAssertEqual(payload.servers.count, 2, "the urltest itself is not a node")
+
+        XCTAssertEqual(payload.groups.count, 1)
+        let group = payload.groups.first
+        XCTAssertEqual(group?.name, "NL")
+        XCTAssertEqual(group?.kind, .urltest)
+        XCTAssertEqual(group?.interval, "2m")
+        XCTAssertEqual(group?.tolerance, 100)
+        XCTAssertEqual(group?.memberIDs, payload.servers.map(\.id),
+                       "members resolve to the nodes named by their tags, in order")
+    }
+
+    func testSingBoxSelectorCarriesItsDefaultMember() {
+        let body = """
+        {"outbounds": [
+          \(node("a", "1.1.1.1")),
+          \(node("b", "2.2.2.2")),
+          {"type": "selector", "tag": "Pick", "outbounds": ["a", "b"], "default": "b"}
+        ], "route": {}}
+        """
+        let payload = parse(body)
+        let group = payload.groups.first
+        XCTAssertEqual(group?.kind, .selector)
+        XCTAssertEqual(group?.selectedID, payload.servers.last?.id)
+    }
+
+    func testMembersThatAreNotNodesAreDropped() {
+        // `direct` is a real sing-box outbound and a perfectly normal member of
+        // a selector, but it is not something Veil can connect to.
+        let body = """
+        {"outbounds": [
+          \(node("a", "1.1.1.1")),
+          {"type": "direct", "tag": "direct"},
+          {"type": "selector", "tag": "Pick", "outbounds": ["a", "direct"]}
+        ], "route": {}}
+        """
+        let payload = parse(body)
+        XCTAssertEqual(payload.groups.first?.memberIDs.count, 1)
+    }
+
+    func testEmptyGroupIsNotKept() {
+        let body = """
+        {"outbounds": [
+          {"type": "direct", "tag": "direct"},
+          {"type": "selector", "tag": "Pick", "outbounds": ["direct"]}
+        ], "route": {}}
+        """
+        XCTAssertTrue(parse(body).groups.isEmpty,
+                      "a group with nothing connectable in it is not a group")
+    }
+
+    func testXrayBalancerGroupsTheTagsItsSelectorMatches() {
+        let body = """
+        {"outbounds": [
+          {"protocol": "vless", "tag": "de-1",
+           "settings": {"vnext": [{"address": "1.1.1.1", "port": 443,
+             "users": [{"id": "11111111-2222-3333-4444-555555555555"}]}]}},
+          {"protocol": "vless", "tag": "de-2",
+           "settings": {"vnext": [{"address": "2.2.2.2", "port": 443,
+             "users": [{"id": "11111111-2222-3333-4444-555555555555"}]}]}},
+          {"protocol": "freedom", "tag": "direct"}
+        ],
+        "routing": {"balancers": [{"tag": "DE", "selector": ["de-"]}]}}
+        """
+        let payload = parse(body)
+        XCTAssertEqual(payload.format, .xrayJSON)
+        XCTAssertEqual(payload.groups.count, 1)
+        XCTAssertEqual(payload.groups.first?.name, "DE")
+        XCTAssertEqual(payload.groups.first?.memberIDs.count, 2,
+                       "`direct` does not match the `de-` prefix")
+    }
+
+    func testShareLinksDeclareNoGroups() {
+        let body = "vless://11111111-2222-3333-4444-555555555555@1.1.1.1:443?type=tcp#NL-01"
+        let payload = parse(body)
+        XCTAssertEqual(payload.format, .links)
+        XCTAssertTrue(payload.groups.isEmpty)
+    }
+}
+
+/// `store.json` is read with a single `try?`: one key a decoder insists on and
+/// cannot find empties every subscription the user had.
+final class SubscriptionStoreCompatibilityTests: XCTestCase {
+
+    func testAStoreWrittenBeforeGroupsExistedStillDecodes() throws {
+        let json = """
+        {"id": "3F2504E0-4F89-11D3-9A0C-0305E82C3301", "name": "Panel",
+         "servers": [], "autoUpdate": true, "isCollapsed": false}
+        """
+        let sub = try JSONDecoder().decode(Subscription.self,
+                                           from: Data(json.utf8))
+        XCTAssertEqual(sub.name, "Panel")
+        XCTAssertTrue(sub.declaredGroups.isEmpty)
+    }
+}

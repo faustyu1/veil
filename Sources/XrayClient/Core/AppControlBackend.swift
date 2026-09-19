@@ -89,7 +89,10 @@ final class AppControlBackend: ControlBackend {
     }
 
     func rules() -> [RoutingRule] { store.settings.customRules }
-    func groups() -> [ServerGroup] { store.settings.serverGroups }
+    /// Both the user's groups and the ones the panels declared: the API
+    /// answers with the outbound graph as it is built, not with the half of it
+    /// that happens to be stored in settings.
+    func groups() -> [ServerGroup] { store.settings.serverGroups + store.declaredGroups }
     func dns() -> DNSSettings { store.settings.dns }
     func preset() -> RoutingPreset { store.settings.routingPreset }
 
@@ -100,6 +103,7 @@ final class AppControlBackend: ControlBackend {
         input.activeServerID = connection.activeServerID ?? store.selectedServerID
         input.ports = connection.ports
         input.includeTun = store.settings.mode == .tun
+        input.subscriptionGroups = store.declaredGroups
         let data = try SingBoxProfileBuilder.jsonData(ProfileAssembler.profile(input))
         return String(data: data, encoding: .utf8) ?? "{}"
     }

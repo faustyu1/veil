@@ -31,6 +31,7 @@ enum SubscriptionService {
             let name = result.metadata.profileTitle ?? sub.name
             store.addOrUpdateSubscription(name: name, url: url,
                                           servers: result.servers,
+                                          groups: result.payload.groups,
                                           metadata: result.metadata,
                                           format: result.payload.format)
             return true
