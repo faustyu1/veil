@@ -29,7 +29,7 @@
 </p>
 
 <p align="center">
-  <img src=".github/assets/screenshot.png" width="720" alt="Главное окно Veil">
+  <img src=".github/assets/screenshot.ru.png" width="720" alt="Главное окно Veil">
 </p>
 
 ---
