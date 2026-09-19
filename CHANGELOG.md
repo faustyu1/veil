@@ -3,6 +3,29 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Veil is now licensed under the **GNU Affero General Public License v3.0**
+  instead of MIT. The bundled cores keep their own licences and nothing in the
+  app is paywalled; the change only requires that anyone who distributes a
+  modified Veil, or runs one over a network, offers the source for it.
+- The README is rewritten around what Veil actually does, with the protocol
+  matrix, the two tunnel modes and the security model up front, and a Russian
+  translation in `README.ru.md`.
+
+### Added
+
+- `CONTRIBUTING.md`, a Contributor Covenant `CODE_OF_CONDUCT.md`, and a
+  `CLAUDE.md` recording the rules that are easy to get wrong — the helper's
+  cdhash pin, the TUN stack, the localization table, the build SDK.
+
+### Removed
+
+- `docs/PLAN.md`. The roadmap had outlived the work it described; the
+  CHANGELOG and the issue tracker say what is done and what is next.
+
 ## [1.7.0] — 2026-09-19
 
 ### Added

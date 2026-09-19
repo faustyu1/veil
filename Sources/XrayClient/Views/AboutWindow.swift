@@ -33,7 +33,7 @@ struct AboutWindow: View {
             .font(.callout)
             .padding(.top, 2)
 
-            Text(verbatim: "MIT · Xray-core · sing-box")
+            Text(verbatim: "AGPLv3 · Xray-core · sing-box")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .padding(.bottom, 18)
         }
