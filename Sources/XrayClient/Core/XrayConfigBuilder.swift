@@ -176,9 +176,6 @@ enum XrayConfigBuilder {
             out = ["protocol": "freedom", "settings": [:]]
         }
         out["tag"] = tag
-        // WireGuard carries its own transport; stream settings and mux do not
-        // apply to it.
-        if cfg.proto != .wireguard, let mux = muxSettings(cfg) { out["mux"] = mux }
         return out
     }
 
@@ -192,19 +189,16 @@ enum XrayConfigBuilder {
         return nodes.enumerated().map { singleOutbound($1, tag: "proxy-\($0)") }
     }
 
-    /// Connection multiplexing reuses a single TCP/Reality connection for many
-    /// streams, cutting handshake overhead. It is INCOMPATIBLE with XTLS
-    /// `xtls-rprx-vision` flow, so it is disabled whenever Vision is in use.
-    private static func muxSettings(_ cfg: ProxyConfig) -> [String: Any]? {
-        if let flow = cfg.flow, flow.contains("vision") { return nil }
-        return [
-            "enabled": true,
-            "concurrency": 8,
-            // Keep UDP (DNS, QUIC) on its own connections for lower latency.
-            "xudpConcurrency": 16,
-            "xudpProxyUDP443": "reject"
-        ]
-    }
+    // No `mux` block is emitted, and that is deliberate.
+    //
+    // Xray's mux.cool needs the *server* to accept it, and the panels these
+    // subscriptions come from leave it off. When the server does not speak it
+    // the outbound still dials — the handshake succeeds and the request is
+    // wrapped for `v1.mux.cool:9527` — and then every stream dies with
+    // "failed to read metadata", which reaches the user as a connected tunnel
+    // that carries nothing. XHTTP is worse again: it already multiplexes over
+    // xmux, so a second layer buys nothing and breaks the first. Xray's own
+    // default is off; matching it is what makes these nodes work.
 
     private static func vlessOutbound(_ cfg: ProxyConfig) -> [String: Any] {
         var user: [String: Any] = [

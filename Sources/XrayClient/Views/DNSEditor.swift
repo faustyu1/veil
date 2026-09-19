@@ -30,8 +30,23 @@ struct DNSEditor: View {
             Toggle(loc("Handle DNS in the tunnel"), isOn: $dns.enabled)
                 .onChange(of: dns.enabled) { _, _ in onChange() }
 
+            // Turning this off does not mean "no DNS": in TUN mode the queries
+            // still get answered, by whatever resolver the network handed out.
+            // That is the resolver a blocked site is blocked at, so the symptom
+            // is a tunnel that works for most of the web and not for the part
+            // the user turned it on for.
+            if !dns.enabled {
+                Label(loc("With this off, names are resolved by your network's own resolver — the tunnel carries the connection, but a domain that resolver blocks or poisons stays broken."),
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            // The bootstrap resolver is deliberately absent: it is the one
+            // pinned to `direct`, so picking it here would quietly send every
+            // lookup around the tunnel.
             Picker(loc("Answer with"), selection: $dns.finalTag) {
-                ForEach(dns.servers) { server in
+                ForEach(dns.finalCandidates) { server in
                     Text(server.tag).tag(server.tag)
                 }
             }
@@ -164,7 +179,17 @@ struct DNSEditor: View {
 
         if kind != .fakeip && kind != .local {
             LabeledContent(loc("Queries go through")) {
-                detourPicker(server.detour)
+                // The bootstrap resolver is what turns a node's hostname into
+                // an address, so it cannot be sent through the tunnel it is
+                // helping to build. Stating that beats offering a choice that
+                // stops the core from starting.
+                if server.wrappedValue.tag == DNSSettings.Builtin.bootstrap {
+                    Text(loc("Direct"))
+                        .foregroundStyle(.secondary)
+                        .help(loc("The bootstrap resolver runs before the tunnel exists, so its own queries always go direct."))
+                } else {
+                    detourPicker(server.detour)
+                }
             }
         }
     }

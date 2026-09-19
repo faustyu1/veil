@@ -3,6 +3,36 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] — 2026-09-19
+
+### Fixed
+
+- Nodes that need the Xray bridge — XHTTP, mKCP, VLESS with post-quantum
+  encryption — connected and then carried nothing, in both System Proxy and TUN
+  mode. The bridge was built with Xray's `mux.cool` multiplexing switched on,
+  which the servers these subscriptions come from do not accept: the handshake
+  succeeded, the request went out addressed to `v1.mux.cool`, and every stream
+  died with `failed to read metadata`. At the default log level none of that was
+  printed, so the tunnel looked healthy while moving zero bytes. No outbound
+  enables mux any more, which is also Xray's own default.
+- The DNS catch-all can no longer be the bootstrap resolver. That entry is
+  pinned to `direct` so a node's hostname can be resolved before the tunnel
+  exists; selecting it as "Answer with" sent every lookup out in the clear, to
+  the resolver the tunnel was turned on to get away from. It is now left out of
+  the picker and corrected on the way to the core.
+- TUN mode could report "tunnel up" over a tunnel that was already dead. The
+  helper treated the appearance of a `utun` device as success, but sing-box
+  creates the interface before it installs the routes that make it useful, so a
+  core that failed on `auto_route` was still alive at that instant. The device
+  now starts a grace period instead of ending the check.
+
+### Changed
+
+- The routing core's log now reaches the app's log window in TUN mode. It runs
+  as root there and writes to a file the app cannot open, so the window used to
+  show only the Xray bridge — a core that came up and then misbehaved left no
+  trace at all. Terminal colour codes are stripped on the way in, in both modes.
+
 ## [1.6.0] — 2026-09-18
 
 ### Added

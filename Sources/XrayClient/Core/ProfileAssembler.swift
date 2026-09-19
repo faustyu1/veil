@@ -54,7 +54,7 @@ enum ProfileAssembler {
                                        servers: expansion.servers)
         profile.rules = input.settings.effectiveRoutingRules
         profile.explicitRuleSets = input.settings.ruleSets
-        profile.dns = input.settings.dns
+        profile.dns = input.settings.dns.sanitized()
         profile.ports = input.ports
         profile.logLevel = input.settings.logLevel.rawValue
         profile.bridgePorts = input.bridgePorts

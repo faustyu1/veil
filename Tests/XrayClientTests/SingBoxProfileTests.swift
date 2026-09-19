@@ -374,3 +374,114 @@ final class SingBoxProfileTests: XCTestCase {
         }
     }
 }
+
+/// sing-box colours its log unconditionally, so the app strips the escapes on
+/// the way into a window that cannot render them.
+final class LogSanitizeTests: XCTestCase {
+
+    func testColourCodesAreStripped() {
+        let line = "+0400 2026-09-19 02:11:00 \u{1B}[31mERROR\u{1B}[0m inbound/http: EOF\n"
+        XCTAssertEqual(ConnectionManager.withoutANSI(line),
+                       "+0400 2026-09-19 02:11:00 ERROR inbound/http: EOF\n")
+    }
+
+    func testPlainTextIsUntouched() {
+        let line = "[info] tunnel up\n"
+        XCTAssertEqual(ConnectionManager.withoutANSI(line), line)
+    }
+
+    func testATruncatedEscapeDoesNotEatTheRestOfTheLine() {
+        XCTAssertEqual(ConnectionManager.withoutANSI("done\u{1B}"), "done")
+        XCTAssertEqual(ConnectionManager.withoutANSI("a\u{1B}b"), "ab")
+    }
+}
+
+/// The DNS section is the part of the configuration a user can most easily
+/// leave in a state the core refuses to start on, so it is repaired on the way
+/// out rather than being handed over as typed.
+final class DNSSanitizeTests: XCTestCase {
+
+    func testBootstrapWithNoAddressIsRepairedRatherThanDropped() {
+        var dns = DNSSettings()
+        // What the editor leaves behind when the bootstrap row is half-filled:
+        // a transport that needs an address, no address, and a detour through
+        // the very tunnel this resolver is supposed to help build.
+        dns.servers = [
+            DNSServerEntry(tag: DNSSettings.Builtin.remote, kind: .https,
+                           server: "1.1.1.1", path: "/dns-query",
+                           detour: ProfileTags.defaultSelector),
+            DNSServerEntry(tag: DNSSettings.Builtin.bootstrap, kind: .tcp,
+                           server: "", detour: "srv-abc")
+        ]
+
+        let fixed = dns.sanitized()
+        let bootstrap = fixed.servers.first { $0.tag == DNSSettings.Builtin.bootstrap }
+        XCTAssertNotNil(bootstrap)
+        XCTAssertFalse(bootstrap!.server.isEmpty)
+        XCTAssertEqual(bootstrap!.detour, ProfileTags.direct)
+    }
+
+    func testAResolverWithNoAddressIsDropped() {
+        var dns = DNSSettings()
+        dns.servers.append(DNSServerEntry(tag: "half-typed", kind: .tls, server: ""))
+        XCTAssertFalse(dns.sanitized().servers.contains { $0.tag == "half-typed" })
+    }
+
+    func testRulesPointingAtAMissingServerAreDropped() {
+        var dns = DNSSettings()
+        dns.rules = [DNSRule(name: "gone", serverTag: "no-such-server",
+                             domains: ["example.com"])]
+        XCTAssertTrue(dns.sanitized().rules.isEmpty)
+    }
+
+    func testTheBootstrapResolverIsNeverTheFinalOne() {
+        var dns = DNSSettings()
+        // Picking the bootstrap entry as the catch-all is the one choice the
+        // editor used to allow that quietly sends every lookup around the
+        // tunnel: that resolver is pinned to `direct`.
+        dns.finalTag = DNSSettings.Builtin.bootstrap
+
+        let fixed = dns.sanitized()
+        XCTAssertNotEqual(fixed.finalTag, DNSSettings.Builtin.bootstrap)
+        XCTAssertEqual(fixed.finalTag, DNSSettings.Builtin.remote)
+    }
+
+    func testAnEmptyFinalTagIsNotLeftPointingAtTheBootstrapResolver() {
+        var dns = DNSSettings()
+        // Empty means "the first server", so ordering alone can put the
+        // bootstrap resolver in the catch-all seat.
+        dns.servers = [
+            DNSServerEntry(tag: DNSSettings.Builtin.bootstrap, kind: .udp,
+                           server: "1.1.1.1", detour: ProfileTags.direct),
+            DNSServerEntry(tag: DNSSettings.Builtin.remote, kind: .https,
+                           server: "1.1.1.1", path: "/dns-query",
+                           detour: ProfileTags.defaultSelector)
+        ]
+        dns.finalTag = ""
+
+        XCTAssertEqual(dns.sanitized().finalTag, DNSSettings.Builtin.remote)
+    }
+
+    func testTheRenderedResolverSendsUnmatchedQueriesThroughTheProxy() {
+        var profile = SingBoxProfile()
+        var dns = DNSSettings()
+        dns.finalTag = DNSSettings.Builtin.bootstrap
+        profile.dns = dns.sanitized()
+
+        let config = SingBoxProfileBuilder.build(profile)
+        let rendered = config["dns"] as! [String: Any]
+        let servers = rendered["servers"] as! [[String: Any]]
+        let final = rendered["final"] as! String
+        let catchAll = servers.first { $0["tag"] as? String == final }
+
+        XCTAssertNotNil(catchAll)
+        XCTAssertEqual(catchAll?["detour"] as? String, ProfileTags.defaultSelector)
+    }
+
+    func testTheBootstrapTagAlwaysResolvesAfterSanitizing() {
+        var dns = DNSSettings()
+        dns.servers.removeAll { $0.tag == DNSSettings.Builtin.bootstrap }
+        let fixed = dns.sanitized()
+        XCTAssertTrue(fixed.servers.contains { $0.tag == fixed.bootstrapTag })
+    }
+}

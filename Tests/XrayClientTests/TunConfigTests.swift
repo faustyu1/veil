@@ -167,4 +167,29 @@ final class TunConfigTests: XCTestCase {
                            "\(proto) needs sing-box and cannot run on the iOS build")
         }
     }
+    /// mux.cool needs server-side support the panels do not enable, and an
+    /// XHTTP node fronted by a bridge dies on it with "failed to read
+    /// metadata" — a tunnel that connects and carries nothing.
+    func testNoOutboundEnablesMux() {
+        var xhttp = ProxyConfig(name: "EU", proto: .vless, address: "a.example", port: 443)
+        xhttp.uuid = "22222222-3333-4444-5555-666666666666"
+        xhttp.network = .xhttp
+        xhttp.security = .tls
+
+        var vision = ProxyConfig(name: "DE", proto: .vless, address: "b.example", port: 443)
+        vision.uuid = "11111111-2222-3333-4444-555555555555"
+        vision.flow = "xtls-rprx-vision"
+        vision.security = .reality
+
+        for cfg in [xhttp, vision] {
+            let json = try! XrayConfigBuilder.jsonData(for: cfg, ports: InboundPorts(),
+                                                       rules: [], logLevel: "warning")
+            let root = try! JSONSerialization.jsonObject(with: json) as! [String: Any]
+            let outbounds = root["outbounds"] as! [[String: Any]]
+            for out in outbounds {
+                XCTAssertNil(out["mux"], "\(cfg.name): \(out["tag"] ?? "?") must not enable mux")
+            }
+        }
+    }
+
 }

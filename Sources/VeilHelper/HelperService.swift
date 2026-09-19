@@ -216,6 +216,7 @@ final class HelperService: NSObject, VeilHelperProtocol, @unchecked Sendable {
             "-D", VeilHelperInfo.coreWorkingDirectory
         ]
         attachLog(VeilHelperInfo.coreLogPath, to: process)
+        let devicesBefore = NetworkOps.tunnelDevices()
         do {
             try process.run()
         } catch {
@@ -225,7 +226,7 @@ final class HelperService: NSObject, VeilHelperProtocol, @unchecked Sendable {
 
         // A configuration the core rejects is fatal within milliseconds, so a
         // short wait turns "it is not working" into the core's own message.
-        if !survivesStartup(process) {
+        if !survivesStartup(process, newDeviceSince: devicesBefore) {
             let detail = lastLogLines(VeilHelperInfo.coreLogPath, count: 3).map { ": \($0)" } ?? ""
             return "The routing core exited on startup\(detail)"
         }
@@ -289,11 +290,33 @@ final class HelperService: NSObject, VeilHelperProtocol, @unchecked Sendable {
         return false
     }
 
-    /// True when the process is still alive a moment after launch.
-    private func survivesStartup(_ process: Process) -> Bool {
-        for _ in 0..<15 {
+    /// True when the core is up.
+    ///
+    /// The tunnel device the core creates is the first signal: it appears
+    /// within a few hundred milliseconds of a good start, so watching for it
+    /// beats sitting out a fixed delay. It is not the last signal, though —
+    /// the interface is created *before* the routes that make it useful are
+    /// installed, and a core that fails on `auto_route` is still alive and
+    /// still holding a `utunN` at that instant. Returning there is how "the
+    /// tunnel is up" ends up on screen over a tunnel that carries nothing, so
+    /// the device only starts a short grace period, and the answer is whether
+    /// the core is still running at the end of it.
+    private func survivesStartup(_ process: Process, newDeviceSince before: Set<String>) -> Bool {
+        let deadline = Date().addingTimeInterval(5)
+        var confirmBy: Date?
+        while Date() < deadline {
             if !process.isRunning { return false }
-            Thread.sleep(forTimeInterval: 0.1)
+            if confirmBy == nil,
+               !NetworkOps.tunnelDevices().subtracting(before).isEmpty {
+                confirmBy = min(Date().addingTimeInterval(1), deadline)
+            }
+            if let confirmBy, Date() >= confirmBy { return true }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if confirmBy == nil {
+            // Still running but no device of its own: unusual, and not worth
+            // calling a failure — the core is alive and says why in its log.
+            log.info("core is up but no new tunnel device appeared")
         }
         return process.isRunning
     }

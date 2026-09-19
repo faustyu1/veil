@@ -73,6 +73,25 @@ enum NetworkOps {
         run(ifconfig, [device]).status == 0
     }
 
+    /// Every tunnel device currently on the machine.
+    ///
+    /// The core picks its own `utunN`, so "did the tunnel come up" is answered
+    /// by watching for a device that was not there a moment ago.
+    static func tunnelDevices() -> Set<String> {
+        // Read the interface list directly: this is polled while the core
+        // starts, and forking `ifconfig` every 50 ms to answer it would cost
+        // more than the wait it is shortening.
+        var addresses: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&addresses) == 0, let first = addresses else { return [] }
+        defer { freeifaddrs(addresses) }
+        var found: Set<String> = []
+        for entry in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: entry.pointee.ifa_name)
+            if name.hasPrefix("utun") { found.insert(name) }
+        }
+        return found
+    }
+
     @discardableResult
     static func configureInterface(_ device: String, address: String,
                                    peer: String, mtu: Int) -> Bool {

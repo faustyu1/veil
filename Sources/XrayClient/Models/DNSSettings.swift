@@ -254,6 +254,81 @@ struct DNSSettings: Codable, Equatable {
             ?? Builtin.local
     }
 
+    /// The resolvers that may legitimately be picked as `final`.
+    ///
+    /// The bootstrap entry is excluded on purpose: it is pinned to `direct`, so
+    /// choosing it as the catch-all would put every lookup outside the tunnel.
+    var finalCandidates: [DNSServerEntry] {
+        servers.filter { $0.tag != Builtin.bootstrap }
+    }
+
+    /// The settings as they are safe to hand the core.
+    ///
+    /// The editor lets a server be left half-filled — a transport with no
+    /// address, a bootstrap resolver pointed at a proxied outbound — and every
+    /// one of those makes sing-box refuse to start, which the user sees as "the
+    /// tunnel does not come up" rather than as a field they got wrong. So the
+    /// profile is built from a repaired copy: an unusable custom server is
+    /// dropped, and the two entries the rest of the config names by tag are put
+    /// back into a working shape.
+    ///
+    /// The bootstrap resolver in particular has to stay on `direct` with a real
+    /// address: it is what turns the node's own hostname into an IP, so routing
+    /// it through the tunnel would mean needing the tunnel to build the tunnel.
+    func sanitized() -> DNSSettings {
+        var copy = self
+        var repaired: [DNSServerEntry] = []
+
+        for var entry in copy.servers {
+            if entry.tag == Builtin.bootstrap {
+                if !entry.kind.needsServer { entry.kind = .udp }
+                if entry.server.trimmingCharacters(in: .whitespaces).isEmpty {
+                    entry.server = "1.1.1.1"
+                }
+                entry.detour = ProfileTags.direct
+            }
+            if entry.kind.needsServer,
+               entry.server.trimmingCharacters(in: .whitespaces).isEmpty {
+                continue
+            }
+            repaired.append(entry)
+        }
+
+        if !repaired.contains(where: { $0.tag == Builtin.bootstrap }) {
+            repaired.append(DNSServerEntry(tag: Builtin.bootstrap, kind: .udp,
+                                           server: "1.1.1.1",
+                                           detour: ProfileTags.direct))
+        }
+        // Something has to answer the queries that no rule matched.
+        if !repaired.contains(where: { $0.tag != Builtin.bootstrap }) {
+            repaired.insert(DNSServerEntry(tag: Builtin.remote, kind: .https,
+                                           server: "1.1.1.1", path: "/dns-query",
+                                           detour: ProfileTags.defaultSelector),
+                            at: 0)
+        }
+        copy.servers = repaired
+
+        // `final` answers every query no rule matched, so it decides where the
+        // bulk of the lookups go — and it must not be the bootstrap resolver.
+        // That one is pinned to `direct` so the tunnel can be built before it
+        // exists; making it the catch-all sends every name out in the clear, to
+        // the resolver the tunnel was turned on to get away from. The tunnel
+        // then dutifully carries traffic to whatever addresses that resolver
+        // chose. An empty tag means "the first server", which lands in the same
+        // place when the bootstrap entry happens to be first, so it is resolved
+        // here rather than left to sing-box.
+        let tags = Set(repaired.map(\.tag))
+        let effectiveFinal = copy.finalTag.isEmpty
+            ? (repaired.first?.tag ?? "") : copy.finalTag
+        if !tags.contains(effectiveFinal) || effectiveFinal == Builtin.bootstrap {
+            copy.finalTag = tags.contains(Builtin.remote) ? Builtin.remote
+                : (repaired.first { $0.tag != Builtin.bootstrap }?.tag ?? "")
+        }
+        // A rule pointing at a server that no longer exists is fatal too.
+        copy.rules = copy.rules.filter { $0.reject || tags.contains($0.serverTag) }
+        return copy
+    }
+
     private enum CodingKeys: String, CodingKey {
         case enabled, servers, rules, finalTag, strategy, disableCache
         case cacheCapacity, optimistic, reverseMapping, timeout, clientSubnet

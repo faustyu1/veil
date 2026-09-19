@@ -89,6 +89,11 @@ final class ConnectionManager {
     private var pendingLog = ""
     private var logFlushTask: Task<Void, Never>?
 
+    /// Pulls the root-owned core log into the app's log while TUN mode is up.
+    private var coreLogTask: Task<Void, Never>?
+    /// Last line already shown, so a repeated tail is not printed twice.
+    private var coreLogSeen = ""
+
     /// When the current connect attempt began, for the "ready in Ns" log line.
     private var connectStarted: Date?
 
@@ -254,6 +259,9 @@ final class ConnectionManager {
         if !isReconnecting { logs = ""; pendingLog = "" }
         activeServerName = server.name
         appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title), sing-box)\n")
+        if mode == .tun && !settings.dns.enabled {
+            appendLog("[warn] DNS handling is off: names are resolved by the network's own resolver, so domains it blocks stay broken inside the tunnel\n")
+        }
 
         let data: Data
         do {
@@ -310,6 +318,7 @@ final class ConnectionManager {
                     self.activeUsedProfile = true
                     self.finishConnect(serverID: serverID, mode: .tun)
                     self.appendLog("[info] tunnel up (sing-box owns the interface)\n")
+                    self.startCoreLogPump()
                 }
             } catch {
                 let tail = TunManager.nativeCoreStatus.log
@@ -329,6 +338,9 @@ final class ConnectionManager {
             fail("sing-box binary not found. Run Scripts/fetch-singbox.sh")
             return
         }
+        // This core logs to the app directly, so the helper's log is no longer
+        // the one to watch.
+        stopCoreLogPump()
         xray.stop()
         do {
             try xray.start(configData: data, binary: binary)
@@ -465,6 +477,7 @@ final class ConnectionManager {
         let wasConnected = (state == .connected)
         let name = activeServerName
         stopWatchdog()
+        stopCoreLogPump()
         activeServer = nil
         teardownTransport()
         xray.stop()
@@ -495,6 +508,7 @@ final class ConnectionManager {
     }
 
     private func fail(_ message: String) {
+        stopCoreLogPump()
         isReconnecting = false
         state = .failed(message)
         appendLog("[error] \(message)\n")
@@ -555,6 +569,57 @@ final class ConnectionManager {
     private func stopWatchdog() {
         watchdogTask?.cancel()
         watchdogTask = nil
+    }
+
+    // MARK: - Core log (TUN mode)
+
+    /// Mirrors the routing core's log into the app's log window.
+    ///
+    /// In system-proxy mode the core is a child of this process and its output
+    /// is piped straight into the log. In TUN mode it is the helper's child and
+    /// writes to a root-owned file the app cannot open, so the only thing the
+    /// window ever showed was the Xray bridge — a core that came up and then
+    /// misbehaved left no trace at all, and "it just does not work" was the
+    /// whole of the available evidence. The helper hands out the tail over XPC;
+    /// this polls it and prints what is new.
+    private func startCoreLogPump() {
+        // A server switch restarts the core but keeps the same log; leaving the
+        // existing pump alone is what stops the last few lines being reprinted.
+        guard coreLogTask == nil else { return }
+        coreLogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let tail = await Task.detached(priority: .utility) {
+                    TunManager.nativeCoreStatus.log
+                }.value
+                if Task.isCancelled { return }
+                await MainActor.run {
+                    guard let self, self.activeMode == .tun else { return }
+                    if let tail { self.emitCoreLog(tail) }
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private func stopCoreLogPump() {
+        coreLogTask?.cancel()
+        coreLogTask = nil
+        coreLogSeen = ""
+    }
+
+    /// Prints the lines of `tail` that have not been printed yet.
+    private func emitCoreLog(_ tail: String) {
+        let lines = tail.split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+        guard !lines.isEmpty else { return }
+        // The tail is a fixed number of trailing lines, so consecutive reads
+        // overlap. Resume after the last line already shown; when it has fallen
+        // out of the window entirely, everything in hand is new.
+        let start = coreLogSeen.isEmpty ? 0
+            : (lines.lastIndex(of: coreLogSeen).map { $0 + 1 } ?? 0)
+        guard start < lines.count else { return }
+        for line in lines[start...] { appendLog("[core] \(line)\n") }
+        coreLogSeen = lines[lines.count - 1]
     }
 
     // MARK: - Uptime
@@ -755,7 +820,7 @@ final class ConnectionManager {
         // each one straight to `logs` republishes the view that many times and
         // wedges the UI, so lines are collected and flushed five times a
         // second, and a burst is summarised rather than kept.
-        pendingLog += text
+        pendingLog += ConnectionManager.withoutANSI(text)
         if pendingLog.count > 64_000 {
             let dropped = pendingLog.count - 32_000
             pendingLog = "[warn] \(dropped) characters of core output dropped\n"
@@ -769,6 +834,29 @@ final class ConnectionManager {
     }
 
     /// Moves whatever the cores printed since the last flush into `logs`.
+    /// The same text with terminal colour codes removed.
+    ///
+    /// sing-box colours its output whether or not anything is attached to a
+    /// terminal, and it has no option to stop — the log window is not a
+    /// terminal, so the escapes arrive as `[31m` littered through every line.
+    nonisolated static func withoutANSI(_ text: String) -> String {
+        guard text.contains("\u{1B}") else { return text }
+        var out = ""
+        out.reserveCapacity(text.count)
+        var rest = Substring(text)
+        while let escape = rest.firstIndex(of: "\u{1B}") {
+            out += rest[rest.startIndex..<escape]
+            rest = rest[rest.index(after: escape)...]
+            guard rest.first == "[" else { continue }
+            // CSI: parameter bytes, then one final byte in @ through ~.
+            guard let final = rest.dropFirst().firstIndex(where: {
+                ("\u{40}"..."\u{7E}").contains($0)
+            }) else { return out + rest }
+            rest = rest[rest.index(after: final)...]
+        }
+        return out + rest
+    }
+
     private func flushLog() {
         logFlushTask = nil
         guard !pendingLog.isEmpty else { return }
