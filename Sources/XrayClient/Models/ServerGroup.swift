@@ -38,6 +38,10 @@ struct ServerGroup: Codable, Equatable, Identifiable {
     var memberIDs: [UUID] = []
     /// Selector only: the member currently in use. Nil means "the first one".
     var selectedID: UUID?
+    /// What the group asks for, when its membership is automatic. Nil means
+    /// `memberIDs` is the user's own hand-picked list and nothing rewrites it.
+    /// Optional so that a group written by an older build still decodes.
+    var query: GroupQuery?
     /// URL test only.
     var testURL: String = "http://www.gstatic.com/generate_204"
     var interval: String = "3m"
@@ -55,6 +59,9 @@ struct ServerGroup: Codable, Equatable, Identifiable {
     }
 
     var tag: String { ProfileTags.group(id) }
+
+    /// Whether the members are answered from a query rather than listed.
+    var isAutomatic: Bool { query != nil }
 
     /// The group as one connectable entry: something a list can show and a
     /// user can click.
@@ -75,7 +82,7 @@ struct ServerGroup: Codable, Equatable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, kind, memberIDs, selectedID, testURL, interval
+        case id, name, kind, memberIDs, selectedID, query, testURL, interval
         case tolerance, interruptExistingConnections
     }
 
@@ -89,6 +96,7 @@ struct ServerGroup: Codable, Equatable, Identifiable {
         kind = get(.kind, .selector)
         memberIDs = get(.memberIDs, [])
         selectedID = try? c.decode(UUID.self, forKey: .selectedID)
+        query = try? c.decode(GroupQuery.self, forKey: .query)
         testURL = get(.testURL, "http://www.gstatic.com/generate_204")
         interval = get(.interval, "3m")
         tolerance = get(.tolerance, 50)

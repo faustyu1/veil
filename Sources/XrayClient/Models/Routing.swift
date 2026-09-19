@@ -27,6 +27,14 @@ enum RuleTarget: Codable, Equatable, Hashable {
         }
     }
 
+    /// Whether this target names something only the full profile can build.
+    var needsProfile: Bool {
+        switch self {
+        case .server, .group: return true
+        case .proxy, .direct, .block: return false
+        }
+    }
+
     /// Xray has a single proxy outbound, so node- and group-specific targets
     /// collapse onto it there.
     var xrayTag: String {
@@ -117,6 +125,14 @@ enum RuleDirection: String, Codable, CaseIterable, Identifiable {
 /// sing-box, and `geosite:` / `geoip:` entries become rule-sets rather than
 /// being dropped.
 struct RoutingRule: Codable, Equatable, Identifiable {
+
+    /// Whether any of these rules names a specific node or group, which only
+    /// the full sing-box profile can build. A rule that cannot be honoured
+    /// must not look configured, so the editor asks this and says so.
+    static func needsProfile(_ rules: [RoutingRule]) -> Bool {
+        rules.contains { $0.enabled && $0.target.needsProfile }
+    }
+
     var id = UUID()
     var name: String = ""
     var target: RuleTarget = .proxy

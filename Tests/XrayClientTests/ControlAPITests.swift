@@ -51,6 +51,13 @@ final class ControlAPITests: XCTestCase {
         }
         func disconnect() { disconnectCount += 1 }
         func renderedProfile() throws -> String { "{\"outbounds\":[]}" }
+        func sources() -> [ControlSource] { [] }
+        func refreshSources() {}
+        func annotations() -> [UUID: NodeAnnotation] { [:] }
+        func setAnnotations(_ annotations: [UUID: NodeAnnotation]) {}
+        func log() -> String { "" }
+        func diagnostics() -> String { "" }
+        func apply() {}
     }
 
     private func router(_ backend: FakeBackend) -> ControlRouter {

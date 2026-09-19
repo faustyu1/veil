@@ -27,6 +27,13 @@ final class ControlServerLiveTests: XCTestCase {
         func connect(serverID: UUID) throws {}
         func disconnect() {}
         func renderedProfile() throws -> String { "{}" }
+        func sources() -> [ControlSource] { [] }
+        func refreshSources() {}
+        func annotations() -> [UUID: NodeAnnotation] { [:] }
+        func setAnnotations(_ annotations: [UUID: NodeAnnotation]) {}
+        func log() -> String { "" }
+        func diagnostics() -> String { "" }
+        func apply() {}
     }
 
     func testServesOverTheLoopback() async throws {

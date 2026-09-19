@@ -13,6 +13,13 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var aliveOnly = false
     @State private var sortByPing = false
+    /// Tag and country chips the user turned on. Chips of one kind are OR-ed,
+    /// chips of different kinds narrow each other.
+    @State private var selectedTags: Set<String> = []
+    @State private var selectedCountries: Set<String> = []
+    /// Which half of the window is on screen: the list you connect from, or the
+    /// sources that fill it.
+    @State private var mode: MainMode = .connection
     /// IDs selected for multi-delete in the Manual group.
     @State private var selectedForDeletion: Set<UUID> = []
     @State private var selectionMode = false
@@ -32,38 +39,24 @@ struct ContentView: View {
     /// search text, the alive filter, and ping sort. This is the order the
     /// up/down arrow keys walk through.
     private var navigableServers: [ProxyConfig] {
-        store.subscriptions.flatMap { sub -> [ProxyConfig] in
-            sub.isCollapsed ? [] : Self.filterServers(
-                sub.servers, search: searchText, aliveOnly: aliveOnly,
-                sortByPing: sortByPing, pinger: pinger)
+        store.listSections(filter: listFilter).flatMap { section in
+            section.isCollapsed ? [] : section.groups + section.servers
         }
     }
 
-    /// Shared filter/sort used by both the keyboard navigation order and the
-    /// per-group views, so the two never drift apart.
-    static func filterServers(_ servers: [ProxyConfig], search: String,
-                              aliveOnly: Bool, sortByPing: Bool,
-                              pinger: PingTester) -> [ProxyConfig] {
-        var list = servers
-        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        if !q.isEmpty {
-            list = list.filter { $0.name.lowercased().contains(q)
-                || $0.address.lowercased().contains(q) }
-        }
-        if aliveOnly {
-            list = list.filter {
-                if let outer = pinger.latency(for: $0.id), outer != nil { return true }
-                return false
-            }
-        }
-        if sortByPing {
-            list.sort { a, b in
-                let la = (pinger.latency(for: a.id) ?? nil) ?? Int.max
-                let lb = (pinger.latency(for: b.id) ?? nil) ?? Int.max
-                return la < lb
-            }
-        }
-        return list
+    /// Everything the list header asks of the list, in one value. The rows on
+    /// screen and the order the arrow keys walk are built from this same
+    /// filter, so they cannot drift apart.
+    private var listFilter: ListFilter {
+        var filter = ListFilter()
+        filter.search = searchText
+        filter.aliveOnly = aliveOnly
+        filter.sortByPing = sortByPing
+        filter.tags = Array(selectedTags)
+        filter.countries = Array(selectedCountries)
+        filter.showHidden = store.settings.showHiddenNodes
+        filter.latency = { [pinger] id in (pinger.latency(for: id) ?? nil) }
+        return filter
     }
 
     /// Moves the selection up or down the visible list. Selecting a server while
@@ -91,15 +84,25 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        @Bindable var store = store
+        return VStack(spacing: 0) {
             header
             Divider()
             staleHelperBanner
-            searchBar
-            serverList
+            modeSwitcher
+            if mode == .sources && store.settings.showSourcesTab {
+                SourcesView()
+            } else {
+                searchBar
+                listControls
+                serverList
+            }
             if showLog {
-                LogPane(text: connection.logs, onClear: { connection.clearLogs() })
-                    .frame(minHeight: 80, maxHeight: 168)
+                LogPane(text: connection.logs,
+                        height: $store.settings.logPaneHeight,
+                        onClear: { connection.clearLogs() },
+                        onHeightCommit: { store.save() })
+                    .frame(height: store.settings.logPaneHeight)
             }
             Divider()
             footer
@@ -199,6 +202,118 @@ struct ContentView: View {
         .padding(.horizontal, 12).padding(.vertical, 7)
     }
 
+    /// The two halves of the main window. Where servers come from is a
+    /// different question from which one is in use, and answering it used to
+    /// mean a settings window with no view of the configuration at all.
+    @ViewBuilder
+    private var modeSwitcher: some View {
+        // With the Sources page switched off there is one tab left, and a
+        // segmented control with one segment is a label.
+        if store.settings.showSourcesTab {
+            Picker("", selection: $mode) {
+                ForEach(MainMode.allCases) { mode in
+                    Text(loc(mode.title)).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 2)
+        }
+    }
+
+    /// How the list is divided up, and the chips that narrow it. Both sit
+    /// under the search field because they answer the same question — what am
+    /// I looking at — and neither belongs in a settings window.
+    @ViewBuilder
+    private var listControls: some View {
+        @Bindable var store = store
+        // Both rows are read out of the node names, so they answer to the same
+        // switch: turning name-reading off and still being shown a row of
+        // countries the app guessed is the setting not doing what it says.
+        let countries = store.settings.autoTags ? countriesInUse : []
+        let tags = store.allTags
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Picker(selection: $store.settings.listGrouping) {
+                    ForEach(ListGrouping.allCases) { grouping in
+                        Label(loc(grouping.title), systemImage: grouping.icon).tag(grouping)
+                    }
+                } label: {
+                    Text(loc("Group by"))
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+                .help(loc("Arrange the list by subscription, by tag, or by country. Tags and countries merge every subscription into one list."))
+                .onChange(of: store.settings.listGrouping) { _, _ in store.save() }
+
+                Spacer()
+
+                if !selectedTags.isEmpty || !selectedCountries.isEmpty {
+                    Button(loc("Clear filters")) {
+                        selectedTags = []
+                        selectedCountries = []
+                    }
+                    .buttonStyle(.link).font(.caption)
+                }
+            }
+
+            if countries.count > 1 || !tags.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(countries, id: \.self) { code in
+                        chip(title: NodeFacets.flag(for: code) + " " + NodeFacets.countryName(for: code),
+                             isOn: selectedCountries.contains(code)) {
+                            toggle(code, in: &selectedCountries)
+                        }
+                    }
+                    ForEach(tags, id: \.self) { tag in
+                        chip(title: tag, isOn: selectedTags.contains(tag)) {
+                            toggle(tag, in: &selectedTags)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.bottom, 6)
+        // A filter whose chips are gone would narrow the list invisibly.
+        .onChange(of: store.settings.autoTags) { _, on in
+            if !on { selectedCountries = []; selectedTags = [] }
+        }
+    }
+
+    /// The places the user actually has servers in, in the order the list shows
+    /// them.
+    private var countriesInUse: [String] {
+        var seen = Set<String>()
+        var codes: [String] = []
+        for server in store.allServers {
+            guard let code = NodeFacets(for: server).country, seen.insert(code).inserted else {
+                continue
+            }
+            codes.append(code)
+        }
+        return codes.sorted {
+            NodeFacets.countryName(for: $0).localizedStandardCompare(
+                NodeFacets.countryName(for: $1)) == .orderedAscending
+        }
+    }
+
+    private func chip(title: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(isOn
+                    ? Color.accentColor.opacity(0.25)
+                    : Color.secondary.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func toggle(_ value: String, in set: inout Set<String>) {
+        if set.contains(value) { set.remove(value) } else { set.insert(value) }
+    }
+
     /// Measures every server, unless a measurement is already there or running.
     /// Both list filters are meaningless without one, so they ask for it rather
     /// than showing an empty list and leaving the user to guess why.
@@ -277,16 +392,9 @@ struct ContentView: View {
                     if store.subscriptions.isEmpty {
                         emptyState
                     }
-                    ForEach(store.subscriptions) { sub in
-                        SubscriptionGroupView(
-                            subscription: sub,
-                            searchText: searchText,
-                            aliveOnly: aliveOnly,
-                            sortByPing: sortByPing,
-                            selectionMode: selectionMode && sub.isManual,
-                            selectedForDeletion: $selectedForDeletion
-                        )
-                    }
+                    ServerListView(filter: listFilter,
+                                   selectionMode: selectionMode,
+                                   selectedForDeletion: $selectedForDeletion)
                 }
                 .padding(12)
             }
@@ -448,270 +556,6 @@ struct ContentView: View {
 
 // MARK: - Subscription group (collapsible)
 
-struct SubscriptionGroupView: View {
-    @Environment(ServerStore.self) private var store
-    @Environment(ConnectionManager.self) private var connection
-    @Environment(PingTester.self) private var pinger
-    @Environment(Loc.self) private var loc
-    let subscription: Subscription
-    var searchText: String = ""
-    var aliveOnly: Bool = false
-    var sortByPing: Bool = false
-    var selectionMode: Bool = false
-    var selectedForDeletion: Binding<Set<UUID>> = .constant([])
-
-    /// Server whose QR code is currently being shown (drives the QR sheet).
-    @State private var qrServer: ProxyConfig?
-
-    /// Servers after applying search text, alive filter, and ping sort.
-    private var visibleServers: [ProxyConfig] {
-        ContentView.filterServers(subscription.servers, search: searchText,
-                                  aliveOnly: aliveOnly, sortByPing: sortByPing,
-                                  pinger: pinger)
-    }
-
-    /// The groups this subscription's panel declared, each as one row.
-    ///
-    /// They sit above the nodes because that is what the provider means them
-    /// to be: the entry you pick, with the individual servers underneath for
-    /// anyone who wants to choose by hand.
-    private var visibleGroups: [ProxyConfig] {
-        let rows = subscription.declaredGroups.compactMap { store.representative(for: $0) }
-        guard !searchText.isEmpty else { return rows }
-        return rows.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
-    }
-
-    /// Hide groups entirely filtered out by an active search/alive filter.
-    private var isHidden: Bool {
-        (!searchText.isEmpty || aliveOnly) && visibleServers.isEmpty && visibleGroups.isEmpty
-    }
-
-    var body: some View {
-        if isHidden {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 0) {
-                groupHeader
-                if !subscription.isCollapsed {
-                    ForEach(visibleGroups) { group in
-                        ServerRow(
-                            server: group,
-                            isSelected: store.selectedServerID == group.id,
-                            isActive: connection.activeServerID == group.id,
-                            latency: nil,
-                            isTesting: false
-                        )
-                        .contentShape(Rectangle())
-                        .id(group.id)
-                        .onTapGesture { if !selectionMode { handleTap(group) } }
-                        .contextMenu {
-                            Button(connection.isConnected ? loc("Switch here") : loc("Connect")) {
-                                store.select(group.id); connection.connect(to: group)
-                            }
-                            // No latency of its own: the group is whichever
-                            // member the core finds quickest, so the useful
-                            // measurement is the members'.
-                            Button(loc("Test ping")) {
-                                let members = subscription.declaredGroups
-                                    .first { $0.id == group.id }?.memberIDs ?? []
-                                pinger.test(store.allServers.filter { members.contains($0.id) },
-                                            tunActive: connection.mode == .tun && connection.isConnected)
-                            }
-                        }
-                    }
-                    ForEach(visibleServers) { server in
-                        let isActive = connection.activeServerID == server.id
-                        let isLocked = isActive && connection.isConnected
-                        HStack(spacing: 8) {
-                            if selectionMode {
-                                // A real checkbox, so selection looks and
-                                // behaves the way it does everywhere else on
-                                // the Mac. The active server cannot be picked.
-                                if isLocked {
-                                    Image(systemName: "lock.fill")
-                                        .foregroundStyle(.secondary)
-                                        .help(loc("Connected"))
-                                        .padding(.leading, 14)
-                                } else {
-                                    Toggle("", isOn: Binding(
-                                        get: { selectedForDeletion.wrappedValue.contains(server.id) },
-                                        set: { _ in toggleSelection(server.id) }
-                                    ))
-                                    .toggleStyle(.checkbox)
-                                    .labelsHidden()
-                                    .padding(.leading, 14)
-                                }
-                            }
-                            ServerRow(
-                                server: server,
-                                isSelected: store.selectedServerID == server.id,
-                                isActive: isActive,
-                                latency: pinger.latency(for: server.id),
-                                isTesting: pinger.isTesting(server.id)
-                            )
-                        }
-                        .contentShape(Rectangle())
-                        .id(server.id)
-                        .onTapGesture {
-                            if selectionMode {
-                                if !isLocked { toggleSelection(server.id) }
-                            } else { handleTap(server) }
-                        }
-                        .contextMenu {
-                            Button(connection.isConnected ? loc("Switch here") : loc("Connect")) {
-                                store.select(server.id); connection.connect(to: server)
-                            }
-                            Button(loc("Test ping")) { pinger.test([server], tunActive: connection.mode == .tun && connection.isConnected) }
-                            Divider()
-                            Button(loc("Copy link")) {
-                                let link = LinkBuilder.link(for: server)
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(link, forType: .string)
-                            }
-                            Button(loc("Show QR code")) { qrServer = server }
-                            if subscription.isManual && !isLocked {
-                                Divider()
-                                Button(loc("Delete"), role: .destructive) {
-                                    store.removeServer(id: server.id)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
-            .sheet(item: $qrServer) { server in
-                QRDisplaySheet(server: server)
-            }
-        }
-    }
-
-    private func toggleSelection(_ id: UUID) {
-        if selectedForDeletion.wrappedValue.contains(id) {
-            selectedForDeletion.wrappedValue.remove(id)
-        } else {
-            selectedForDeletion.wrappedValue.insert(id)
-        }
-    }
-
-    /// Disconnected: tap = select only. Connected: tap = switch immediately.
-    private func handleTap(_ server: ProxyConfig) {
-        store.select(server.id)
-        if connection.isConnected {
-            connection.connect(to: server)
-        }
-    }
-
-    private var groupHeader: some View {
-        HStack(spacing: 10) {
-            // The standard disclosure chevron: no invented affordance, and it
-            // turns rather than swapping glyphs.
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(subscription.isCollapsed ? 0 : 90))
-                .animation(.snappy(duration: 0.18), value: subscription.isCollapsed)
-                .frame(width: 16)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(subscription.name).font(.headline)
-                    Text(verbatim: "\(subscription.servers.count)")
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
-                }
-                if let note = subscription.note, !note.isEmpty {
-                    Text(note)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.leading)
-                }
-                trafficLine
-            }
-            Spacer()
-            Menu {
-                Button {
-                    pinger.test(subscription.servers,
-                                tunActive: connection.mode == .tun && connection.isConnected)
-                } label: {
-                    Label(loc("Test ping (group)"), systemImage: "bolt.horizontal")
-                }
-                Button {
-                    store.toggleCollapsed(id: subscription.id)
-                } label: {
-                    Label(subscription.isCollapsed ? loc("Expand") : loc("Collapse"),
-                          systemImage: subscription.isCollapsed
-                            ? "chevron.down" : "chevron.right")
-                }
-                if !subscription.isManual {
-                    Divider()
-                    Button {
-                        Task { await SubscriptionService.refresh(subscription, into: store) }
-                    } label: {
-                        Label(loc("Refresh now"), systemImage: "arrow.clockwise")
-                    }
-                    Toggle(loc("Auto-update"), isOn: Binding(
-                        get: { subscription.autoUpdate },
-                        set: { store.setAutoUpdate($0, id: subscription.id) }
-                    ))
-                    Divider()
-                    // Can't remove a subscription that holds the active server.
-                    let holdsActive = connection.isConnected
-                        && subscription.servers.contains { $0.id == connection.activeServerID }
-                    Button(role: .destructive) {
-                        store.removeSubscription(id: subscription.id)
-                    } label: {
-                        Label(loc("Remove"), systemImage: "trash")
-                    }
-                    .disabled(holdsActive)
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.button)
-            .buttonStyle(.accessoryBar)
-            .menuIndicator(.hidden)
-            .fixedSize()
-        }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .contentShape(Rectangle())
-        .onTapGesture { store.toggleCollapsed(id: subscription.id) }
-    }
-
-    @ViewBuilder
-    private var trafficLine: some View {
-        if let used = subscription.usedBytes {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    // An uncapped plan gets the amount used and nothing else:
-                    // there is no denominator, so there is no ratio to draw.
-                    if subscription.isUnlimitedTraffic || subscription.totalBytes == nil {
-                        Text(verbatim: ByteFormat.string(used))
-                        Text(loc("Unlimited"))
-                            .foregroundStyle(.tertiary)
-                    } else if let total = subscription.totalBytes {
-                        Text(verbatim: "\(ByteFormat.string(used)) / \(ByteFormat.string(total))")
-                    }
-                    if let exp = subscription.expiresAt {
-                        Text(verbatim: "· \(loc("until")) \(exp.formatted(date: .abbreviated, time: .omitted))")
-                    }
-                }
-                .font(.caption2).foregroundStyle(.secondary)
-                if let frac = subscription.usageFraction {
-                    ProgressView(value: frac)
-                        .progressViewStyle(.linear)
-                        .frame(maxWidth: 220)
-                        .tint(frac > 0.9 ? .red : .accentColor)
-                }
-            }
-        } else if let exp = subscription.expiresAt {
-            Text(verbatim: "\(loc("Expires")) \(exp.formatted(date: .abbreviated, time: .omitted))")
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-}
-
 // MARK: - Server row
 
 struct ServerRow: View {
@@ -721,13 +565,36 @@ struct ServerRow: View {
     let isActive: Bool
     let latency: Int??     // outer nil = untested; inner nil = unreachable
     let isTesting: Bool
+    /// What the user attached to this node, if anything.
+    var annotation = NodeAnnotation()
+    /// Whether the row also shows the tags read out of the node's own name.
+    var autoTags = false
 
     var body: some View {
         HStack(spacing: 10) {
             Circle()
                 .fill(isActive ? Color.green : Color.secondary.opacity(0.3))
                 .frame(width: 7, height: 7)
+            if annotation.pinned {
+                Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary)
+            }
             Text(server.name).lineLimit(1)
+                .foregroundStyle(annotation.hidden ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+            // The user's own labels are drawn in the accent colour; the ones
+            // read out of the name are plainer, because they are a reading
+            // rather than a decision. Only the first few fit on a row.
+            ForEach(Array(AutoTags.all(for: server, annotation: annotation,
+                                       derived: autoTags).prefix(3)),
+                    id: \.self) { tag in
+                let isOwn = annotation.tags.contains(tag)
+                Text(tag)
+                    .font(.caption2)
+                    .foregroundStyle(isOwn ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Capsule().fill(isOwn
+                                               ? Color.accentColor.opacity(0.15)
+                                               : Color.secondary.opacity(0.12)))
+            }
             if server.isBalancer {
                 Text(verbatim: "\((server.alternates?.count ?? 0) + 1)")
                     .font(.caption2).foregroundStyle(.secondary)
@@ -777,14 +644,37 @@ struct ServerRow: View {
 struct LogPane: View {
     @Environment(Loc.self) private var loc
     let text: String
+    /// The pane's height, dragged by the grabber along its top edge and kept
+    /// in the settings, because a diagnostics pane that forgets how tall it
+    /// was has to be resized on every launch.
+    @Binding var height: Double
     var onClear: (() -> Void)? = nil
+    /// Called when a drag ends, so the new height reaches disk once rather
+    /// than on every frame of the drag.
+    var onHeightCommit: (() -> Void)? = nil
 
-    private var lineCount: Int {
+    /// What is typed in the search box, and the severity floor.
+    @State private var query = ""
+    @State private var minimum: LogLevel = .none
+    /// The height the current drag started from.
+    @State private var dragStart: Double?
+
+    private var shown: String {
+        LogFilter.apply(text, query: query, minimum: minimum)
+    }
+
+    private var isFiltering: Bool {
+        !query.trimmingCharacters(in: .whitespaces).isEmpty || minimum != .none
+    }
+
+    private func count(_ text: String) -> Int {
         text.isEmpty ? 0 : text.split(separator: "\n", omittingEmptySubsequences: false).count
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let body = shown
+        return VStack(spacing: 0) {
+            grabber
             // Header toolbar.
             HStack(spacing: 8) {
                 Image(systemName: "terminal")
@@ -792,15 +682,34 @@ struct LogPane: View {
                     .foregroundStyle(.secondary)
                 Text(loc("Logs"))
                     .font(.system(size: 12, weight: .semibold))
-                Text(verbatim: "\(lineCount)")
+                // While a filter is on, both numbers: how much is on screen
+                // and how much the core actually wrote.
+                Text(verbatim: isFiltering ? "\(count(body))/\(count(text))"
+                                           : "\(count(text))")
                     .font(.system(size: 10, weight: .medium)).monospacedDigit()
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6).padding(.vertical, 1)
                     .background(Capsule().fill(Color.secondary.opacity(0.15)))
                 Spacer()
+                TextField(loc("Filter"), text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+                    .frame(width: 140)
+                Picker(selection: $minimum) {
+                    Text(loc("All levels")).tag(LogLevel.none)
+                    ForEach(LogLevel.allCases.filter { $0 != .none }) { level in
+                        Text(loc(level.title)).tag(level)
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                }
+                .pickerStyle(.menu).labelsHidden().controlSize(.small)
+                .frame(width: 96)
                 Button {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
+                    // What the eye sees: copying a thousand hidden lines is
+                    // not what the button under a filtered pane means.
+                    NSPasteboard.general.setString(body, forType: .string)
                 } label: {
                     Image(systemName: "doc.on.doc").font(.system(size: 11))
                 }
@@ -824,9 +733,12 @@ struct LogPane: View {
             // Scrollable monospaced body.
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(text.isEmpty ? loc("No logs yet.") : text)
+                    Text(body.isEmpty
+                         ? (isFiltering ? loc("Nothing matches this filter.")
+                                        : loc("No logs yet."))
+                         : body)
                         .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(text.isEmpty ? Color.secondary : .primary)
+                        .foregroundStyle(body.isEmpty ? Color.secondary : .primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                         .padding(10)
@@ -844,6 +756,33 @@ struct LogPane: View {
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
         )
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// The top edge, dragged to make the pane taller or shorter.
+    private var grabber: some View {
+        Capsule()
+            .fill(Color.secondary.opacity(dragStart == nil ? 0.3 : 0.6))
+            .frame(width: 38, height: 4)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let base = dragStart ?? height
+                        if dragStart == nil { dragStart = base }
+                        // Upwards is a negative translation and a taller pane.
+                        height = AppSettings.clampedLogHeight(base - value.translation.height)
+                    }
+                    .onEnded { _ in
+                        dragStart = nil
+                        onHeightCommit?()
+                    }
+            )
+            .onHover { inside in
+                if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+            }
+            .help(loc("Drag to resize"))
     }
 }
 

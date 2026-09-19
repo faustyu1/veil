@@ -45,7 +45,7 @@ enum BalancerGrouper {
 
     private static func groupKey(for server: ProxyConfig) -> String {
         let base = baseName(server.name)
-        let auth = authKey(for: server) ?? ""
+        let auth = NodeIdentity.authKey(for: server) ?? ""
         return "\(base)|\(server.proto.rawValue)|\(auth)"
     }
 
@@ -59,17 +59,4 @@ enum BalancerGrouper {
             .trimmingCharacters(in: .whitespaces)
     }
 
-    /// Returns a stable auth key for grouping balancer members. VLESS/VMess use
-    /// the UUID, Trojan/SS/Hysteria2/TUIC/AnyTLS use the password, WireGuard
-    /// uses the peer public key.
-    private static func authKey(for server: ProxyConfig) -> String? {
-        switch server.proto {
-        case .vless, .vmess:
-            return server.uuid
-        case .trojan, .shadowsocks, .hysteria2, .tuic, .anytls:
-            return server.password
-        case .wireguard:
-            return server.peerPublicKey
-        }
-    }
 }

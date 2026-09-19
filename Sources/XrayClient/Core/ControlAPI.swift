@@ -22,6 +22,21 @@ protocol ControlBackend: AnyObject {
     func preset() -> RoutingPreset
     func setPreset(_ preset: RoutingPreset)
 
+    /// The sources the list is built from, and what each one produced. Never
+    /// their URLs: the path of a subscription URL is the access token.
+    func sources() -> [ControlSource]
+    func refreshSources()
+    /// What the user attached to individual nodes, keyed by node id.
+    func annotations() -> [UUID: NodeAnnotation]
+    func setAnnotations(_ annotations: [UUID: NodeAnnotation])
+    /// The core's log, as it stands. The router redacts and narrows it.
+    func log() -> String
+    /// The same report the Export diagnostics button copies.
+    func diagnostics() -> String
+    /// Pushes the current settings into a live connection, so an edit takes
+    /// effect without naming a server to reconnect to.
+    func apply()
+
     func connect(serverID: UUID) throws
     func disconnect()
     /// The configuration the current settings would produce, for a caller that
@@ -60,6 +75,28 @@ struct ControlServerInfo: Codable {
     var tag: String
 }
 
+/// A source of servers — a subscription, or the nodes added by hand.
+///
+/// Deliberately without the URL. An API that cannot read a secret cannot leak
+/// one, and knowing that a URL exists is all a caller needs.
+struct ControlSource: Codable {
+    var id: UUID
+    var name: String
+    var serverCount: Int
+    var groupCount: Int
+    var lastUpdated: Date?
+    /// What the last fetch could not use, so a caller can explain a server
+    /// that the provider lists and the app does not show.
+    var skipped: [ControlSkipNote]
+    var hasStoredURL: Bool
+}
+
+/// One reason entries were dropped, and how many it accounted for.
+struct ControlSkipNote: Codable {
+    var label: String
+    var count: Int
+}
+
 /// One application a rule can be written against.
 struct ControlApp: Codable {
     var name: String
@@ -89,15 +126,18 @@ struct ControlResponse {
     var contentType = "application/json"
 
     static func json(_ object: Any, status: Int = 200) -> ControlResponse {
-        let data = (try? JSONSerialization.data(withJSONObject: object,
-                                                options: [.prettyPrinted, .sortedKeys]))
+        // Without the last option every path comes back as "\/v1\/state",
+        // which is valid JSON and unreadable to the person the schema is for.
+        let data = (try? JSONSerialization.data(
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]))
             ?? Data("{}".utf8)
         return ControlResponse(status: status, body: data)
     }
 
     static func encode<T: Encodable>(_ value: T, status: Int = 200) -> ControlResponse {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(value) else {
             return .error("could not encode the response", status: 500)
         }
@@ -209,9 +249,57 @@ struct ControlRouter {
             backend.disconnect()
             return .ok
 
+        case ("GET", "/v1/sources"):
+            return .encode(backend.sources())
+        case ("POST", "/v1/sources/refresh"):
+            backend.refreshSources()
+            return .ok
+
+        case ("GET", "/v1/nodes"):
+            return .encode(keyed(backend.annotations()))
+        case ("PUT", "/v1/nodes"):
+            return decode([String: NodeAnnotation].self, request) { posted in
+                var parsed: [UUID: NodeAnnotation] = [:]
+                for (key, annotation) in posted {
+                    guard let id = UUID(uuidString: key) else {
+                        return .error("\"\(key)\" is not a node id", status: 400)
+                    }
+                    parsed[id] = annotation
+                }
+                backend.setAnnotations(parsed)
+                return .encode(keyed(backend.annotations()))
+            }
+
+        case ("GET", "/v1/logs"):
+            let limit = max(1, min(Int(request.query["limit"] ?? "") ?? 200, 2000))
+            let level = request.query["level"].flatMap { LogLevel(rawValue: $0) }
+            let narrowed = LogFilter.apply(backend.log(),
+                                           query: request.query["q"] ?? "",
+                                           minimum: level)
+            // The tail, not the head: the lines that explain what just
+            // happened are the last ones.
+            let lines = narrowed.split(separator: "\n", omittingEmptySubsequences: false)
+            let tail = lines.suffix(limit).joined(separator: "\n")
+            // Redacted here rather than in the backend, because this is the
+            // boundary the secret would cross.
+            return .json(["log": Redaction.text(tail)])
+
+        case ("GET", "/v1/diagnostics"):
+            return .json(["report": Redaction.text(backend.diagnostics())])
+
+        case ("POST", "/v1/apply"):
+            backend.apply()
+            return .ok
+
         default:
             return .error("no such endpoint: \(request.method) \(path)", status: 404)
         }
+    }
+
+    /// Annotations travel as an object keyed by node id, which JSON can carry
+    /// and a `[UUID: …]` dictionary cannot.
+    private func keyed(_ annotations: [UUID: NodeAnnotation]) -> [String: NodeAnnotation] {
+        Dictionary(uniqueKeysWithValues: annotations.map { ($0.key.uuidString, $0.value) })
     }
 
     private struct ConnectBody: Decodable { var serverID: String }
@@ -260,7 +348,14 @@ struct ControlRouter {
             ["PUT /v1/preset", "{\"preset\": \"bypassLAN\"}"],
             ["GET /v1/config", "the configuration the current settings would produce"],
             ["POST /v1/connect", "{\"serverID\": \"<uuid>\"}"],
-            ["POST /v1/disconnect", "stop the tunnel"]
+            ["POST /v1/disconnect", "stop the tunnel"],
+            ["GET /v1/sources", "where the servers come from, with what each fetch skipped"],
+            ["POST /v1/sources/refresh", "re-download every source"],
+            ["GET /v1/nodes", "the user's own labels, pins, hides and renames, by node id"],
+            ["PUT /v1/nodes", "replace them; the body is an object keyed by node id"],
+            ["GET /v1/logs?limit=&level=&q=", "the tail of the core's log, redacted"],
+            ["GET /v1/diagnostics", "the redacted diagnostics report"],
+            ["POST /v1/apply", "push the current settings into a live connection"]
         ]
     ]
 }

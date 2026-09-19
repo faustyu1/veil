@@ -3,6 +3,115 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-09-19
+
+### Added
+
+- A Sources page, the second mode of the main window. It lists every source
+  behind the server list and, for each one, what the last fetch actually
+  returned: the format recognised, how many servers and panel-declared groups
+  came out of it, when it ran, and the traffic and expiry the panel reports.
+  The subscription URL is never drawn — its path is the access token — so it
+  stays in the Keychain, with a "Copy subscription link" command for when it
+  is needed.
+- Sources now say what they could not use. Entries a body carries that Veil
+  cannot connect to — an outbound type it has no support for, a share link
+  with an unknown scheme, a Mihomo YAML body — were dropped in silence, which
+  is why a WireGuard peer could simply fail to appear. Each one is now counted
+  by reason and shown on the Sources page.
+- Any server can be read as its own configuration: the `wg-quick` file for a
+  WireGuard peer, the outbound JSON its core will run, or the share link. A
+  server Veil owns can be edited in that form, and "Check" runs the text past
+  the core that will execute it — `sing-box check` or `xray run -test` — so a
+  typo is named where it is typed. A subscription's server is read-only, with
+  "Duplicate and edit" to take a copy into Manual.
+- Tags, renaming, pinning and hiding for individual servers. These are yours,
+  kept separately from what the panel sends, and they survive a refresh.
+- The list can be grouped by subscription, by tag or by country, or left flat,
+  and filtered by tag, by country and by search. Servers can be dragged into
+  whatever order suits, with "Reset manual order" to go back.
+- Subscriptions can be pinned and reordered, so the list opens on the one in
+  use.
+- Automatic groups. A group can state what it wants — this source, that
+  country, that tag, that protocol, that fragment of a name — instead of
+  naming its members, and the answer is worked out again whenever the list
+  changes. A group over a subscription of fifty nodes stays right when the
+  provider adds the fifty-first; a hand-picked one never did. "Fastest of
+  everything" builds the group most people want in one click, and a source's
+  own menu offers the same over just that source.
+- Your own groups now appear in the server list, at the top, and can be
+  connected to like any server. They were configurable but unreachable
+  outside the routing rules, and there was nowhere to delete one; a group's
+  own row now offers that, and opening the editor from it lands on the groups.
+- A preset says what it actually installs: the rules it puts before your own
+  and the ones it puts after, each with its target and its matchers.
+- Settings are one window with a sidebar. Routing used to be a second window
+  of its own, reached by a button inside a settings tab whose only content was
+  that button; its five pages are now panes in the same list, each with an
+  icon, and the Routing menu command opens them directly.
+- Settings that are not self-explanatory carry an "i" beside their name, with
+  the explanation a click away instead of a paragraph under every row: what
+  each tunnel mode really routes, what the TUN stack setting can break, what
+  the ports and the log level are for, what auto-updating sources does, and
+  what blocking ads and trackers matches.
+- Tags read out of a server's own name — the country, the protocol, a
+  provider's own words like Premium or Trial — with a switch in Settings →
+  General. Off by default: they are guesses about someone else's naming, and
+  the country chips follow the same switch.
+- The Sources tab can be hidden once subscriptions are set up.
+- The log pane can be dragged to whatever height suits and remembers it, and
+  it can be narrowed: a search box, a severity floor that understands both
+  cores' spellings, and a count of how much is on screen against how much the
+  core wrote. Copy takes what is shown rather than everything.
+- The control API reaches the rest of the app. It can now list the sources and
+  what each fetch skipped, refresh them, read and write the labels, pins and
+  renames on individual nodes, read the redacted log and diagnostics, and push
+  an edit into a connection that is already up. Subscription URLs and the
+  device identifier remain out of reach by design, and `docs/agents.md` is the
+  written contract for whoever is driving it.
+
+### Changed
+
+- A refresh keeps the identity of servers that are still there. Every fetch
+  used to mint new ids, which silently broke group membership, routing rules
+  naming a server, and the record of which server was last selected. Servers
+  are now matched on address, port, protocol and key, falling back to name.
+
+### Fixed
+
+- The control API no longer escapes the slashes in every path it prints, which
+  made the schema it hands an assistant read as `GET \/v1\/state`.
+- A rule that sends a domain through a particular server or group now works
+  in System Proxy mode. Turning the native sing-box inbound off — a TUN
+  setting — also dropped that mode onto the single-server path, where there is
+  one proxy outbound and every node- and group-specific target silently
+  collapses onto it. System Proxy has no tunnel interface to own, so it now
+  always builds the full profile. Where the collapse is still real, in TUN
+  mode with the native inbound off, the rules editor says so instead of
+  looking configured.
+- Groups a panel declared can be named by a rule. The target picker only
+  offered your own groups, although the profile has always been able to build
+  a panel's.
+- A routing rule naming a group with no members no longer breaks the profile.
+  The group produces no outbound, so the rule named a tag the core had never
+  heard of and sing-box refused to start. Such a rule now falls back to the
+  default proxy, which is what it asked for.
+- The update download now reports how far it has got. The progress bar was
+  wired to `URLSession`'s task-specific delegate, which never delivers the
+  byte counts for an async download, so it read `Zero KB of 73.7 MB` for the
+  whole transfer and then jumped to the end. It now shows bytes, speed and
+  time remaining as the file arrives.
+- An update that cannot be installed says so instead of quitting. Veil
+  replaces the bundle it is running from, and when that bundle is read-only —
+  a copy macOS made because it was launched from a quarantined archive, or a
+  folder the account cannot write to — the swap was impossible and the app
+  simply closed. Both cases are now checked before anything is unpacked, and
+  the window explains what to move where.
+- An install that fails after Veil has quit is reported on the next launch.
+  The swap runs from a detached script, which used to abort silently at the
+  first error; it now rolls back to the working version, verifies the version
+  it installed, and writes what happened to `~/Library/Logs/Veil/update.log`.
+
 ## [1.7.0] — 2026-09-19
 
 ### Added

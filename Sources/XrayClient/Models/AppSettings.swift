@@ -87,6 +87,31 @@ struct AppSettings: Codable, Equatable {
     // behave like one outbound, so a rule can send an app through a specific
     // group instead of through "the proxy".
     var serverGroups: [ServerGroup] = []
+    /// The Routing window's last tab, so opening it from a group row can land
+    /// on the groups rather than on the rules.
+    var lastRoutingTab: String = "rules"
+    // What the user attached to individual nodes — tags, pinning, hiding,
+    // manual order, a name of their own — and how the list is divided up.
+    // Keyed by node id, which survives a subscription refresh now that
+    // `NodeReconciler` matches incoming nodes onto stored ones.
+    var nodeAnnotations: [UUID: NodeAnnotation] = [:]
+    var listGrouping: ListGrouping = .subscription
+    /// Show nodes the user hid.
+    var showHiddenNodes: Bool = false
+    /// Read tags out of a node's own name and settings — the country, the
+    /// protocol, a provider's own words like "Premium" — on top of the labels
+    /// the user attached by hand.
+    ///
+    /// Off by default: these are guesses about someone else's naming, and a
+    /// list where every node carries four tags nobody wrote is noisier than
+    /// one with none.
+    var autoTags: Bool = false
+    /// Show the Sources tab at the top of the main window. Someone who set
+    /// their subscriptions up once does not need the page every day.
+    var showSourcesTab: Bool = true
+    /// How tall the log pane is, in points, dragged by its top edge.
+    var logPaneHeight: Double = 168
+
     /// Rule-sets the user added by hand. The ones implied by `geosite:` /
     /// `geoip:` entries are derived at build time and need no storage.
     var ruleSets: [RuleSetRef] = []
@@ -140,6 +165,12 @@ struct AppSettings: Codable, Equatable {
     var ipv6Enabled: Bool = true
     var dnsServers: [String] = ["1.1.1.1", "8.8.8.8"]
 
+    /// The heights the log pane may be dragged to. Below the minimum its own
+    /// toolbar no longer fits; above the maximum there is no list left.
+    static func clampedLogHeight(_ height: Double) -> Double {
+        min(max(height, 96), 520)
+    }
+
     init() {}
 
     /// Resilient decoding: any missing key falls back to its default so old
@@ -166,6 +197,15 @@ struct AppSettings: Codable, Equatable {
         customGeoipURL = get(.customGeoipURL, "")
         customGeositeURL = get(.customGeositeURL, "")
         serverGroups = get(.serverGroups, [])
+        lastRoutingTab = get(.lastRoutingTab, "rules")
+        nodeAnnotations = get(.nodeAnnotations, [:])
+        listGrouping = get(.listGrouping, .subscription)
+        showHiddenNodes = get(.showHiddenNodes, false)
+        autoTags = get(.autoTags, false)
+        showSourcesTab = get(.showSourcesTab, true)
+        // A file written by hand, or by a build that clamped differently,
+        // must not be able to hide the server list behind the log.
+        logPaneHeight = AppSettings.clampedLogHeight(get(.logPaneHeight, 168))
         ruleSets = get(.ruleSets, [])
         communityLists = get(.communityLists, [])
         communityListTarget = get(.communityListTarget, .proxy)

@@ -48,6 +48,10 @@ final class UpdateChecker {
     struct DownloadProgress: Equatable, Sendable {
         var received: Int64
         var total: Int64
+        /// Bytes per second, once there have been two readings to compare.
+        var bytesPerSecond: Double?
+        /// How long the rest should take at that rate.
+        var secondsRemaining: TimeInterval?
 
         var fraction: Double? {
             guard total > 0 else { return nil }
@@ -63,6 +67,10 @@ final class UpdateChecker {
         case downloading(DownloadProgress)
         case readyToInstall(Release)
         case failed(String)
+        /// An install that ran after the app quit and did not land. Kept apart
+        /// from `failed` because the two are answered differently: a failed
+        /// check is retried, a failed install is read about.
+        case installFailed(String)
     }
 
     private(set) var phase: Phase = .idle
@@ -235,22 +243,25 @@ final class UpdateChecker {
     }
 
     private func downloadArchive(_ release: UpdateChecker.Release) async throws -> URL {
-        // The plain `download(from:)` reports nothing until it finishes, so the
-        // byte counter comes from a delegate attached to this one task.
-        let observer = DownloadObserver { [weak self] received, expected in
+        // The rate is kept here rather than in the view: the readings arrive
+        // faster than any bar can be redrawn, and smoothing them is the
+        // difference between a speed and a flicker.
+        let meter = RateMeter()
+        let temp = try await ProgressiveDownload.download(from: release.downloadURL) {
+            [weak self] received, expected in
+            let total = expected > 0 ? expected : release.downloadSize
+            let reading = meter.read(received: received, total: total)
             Task { @MainActor in
                 guard let self, case .downloading = self.phase else { return }
-                let total = expected > 0 ? expected : release.downloadSize
-                self.phase = .downloading(DownloadProgress(received: received, total: total))
+                self.phase = .downloading(
+                    DownloadProgress(received: received,
+                                     total: total,
+                                     bytesPerSecond: reading.bytesPerSecond,
+                                     secondsRemaining: reading.secondsRemaining))
             }
         }
-        let (temp, response) = try await URLSession.shared.download(
-            from: release.downloadURL, delegate: observer)
-        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw UpdateError.network("Download failed (\(http.statusCode))")
-        }
-        // URLSession deletes the temporary file as soon as this returns, so it
-        // is moved somewhere we own before anything else touches it.
+        // The downloader hands back a file it does not clean up, so it is moved
+        // somewhere we own before anything else touches it.
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("VeilUpdate-\(release.version)", isDirectory: true)
         try? FileManager.default.removeItem(at: dir)
@@ -269,10 +280,21 @@ final class UpdateChecker {
     /// swaps the directories, and launches the new build.
     func install() {
         guard let archive = downloadedArchive, let release = pendingRelease else { return }
+        let target = Bundle.main.bundleURL
+        // Checked before anything is unpacked and long before the app quits:
+        // once it has, a swap that cannot work has nobody left to report to,
+        // which is how an update used to end in the app simply closing.
+        if let blocker = UpdateInstaller.blocker(for: target) {
+            phase = .failed(Self.explain(blocker, at: target))
+            return
+        }
         do {
             let staged = try unpack(archive)
-            let script = try writeInstallScript(newBundle: staged,
-                                                target: Bundle.main.bundleURL)
+            let script = try writeInstallScript(newBundle: staged, target: target,
+                                                version: release.version)
+            // The verdict of the previous attempt must not be mistaken for
+            // this one's when the app comes back.
+            UpdateInstaller.clearLog(at: UpdateInstaller.logPath)
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/bin/bash")
             task.arguments = [script.path]
@@ -283,6 +305,40 @@ final class UpdateChecker {
         } catch {
             phase = .failed("\(release.version): \(error.localizedDescription)")
         }
+    }
+
+    /// What to tell the user about a bundle that cannot be replaced.
+    private static func explain(_ blocker: UpdateInstaller.Blocker, at url: URL) -> String {
+        switch blocker {
+        case .translocated:
+            return "macOS is running Veil from a read-only copy of itself, so an "
+                + "update would replace nothing. Move Veil to your Applications "
+                + "folder, open it from there, and try again."
+        case .notWritable:
+            return "Veil cannot replace itself at \(url.path) — that folder is not "
+                + "writable. Move Veil to your Applications folder and try again."
+        case .notABundle:
+            return "Veil is not running from an application bundle, so it cannot "
+                + "update itself. Download the new version from the releases page."
+        }
+    }
+
+    /// Reports an install that ran after the app quit and failed.
+    ///
+    /// The swap happens with nothing of ours running, so the log it leaves is
+    /// the only way the next launch learns that the update never landed.
+    /// Reading the verdict clears it, so one failure is reported once.
+    ///
+    /// - Returns: true when there was a failure to show.
+    @discardableResult
+    func reportPreviousInstall() -> Bool {
+        let path = UpdateInstaller.logPath
+        let outcome = UpdateInstaller.lastOutcome(logPath: path)
+        guard outcome != .none else { return false }
+        UpdateInstaller.clearLog(at: path)
+        guard case .failed(let reason) = outcome else { return false }
+        phase = .installFailed(reason)
+        return true
     }
 
     /// Unzips the asset and returns the `.app` inside it.
@@ -320,32 +376,20 @@ final class UpdateChecker {
         return app
     }
 
-    private func writeInstallScript(newBundle: URL, target: URL) throws -> URL {
-        let backup = target.deletingLastPathComponent()
-            .appendingPathComponent(target.deletingPathExtension().lastPathComponent
-                                    + ".old.app")
-        // The old bundle is kept until the new one is in place, so a failed
-        // move leaves a working app behind rather than an empty slot.
-        let script = """
-        #!/bin/bash
-        set -e
-        while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do
-          sleep 0.2
-        done
-        rm -rf "\(backup.path)"
-        if [ -d "\(target.path)" ]; then
-          mv "\(target.path)" "\(backup.path)"
-        fi
-        if ! ditto "\(newBundle.path)" "\(target.path)"; then
-          rm -rf "\(target.path)"
-          mv "\(backup.path)" "\(target.path)"
-          open "\(target.path)"
-          exit 1
-        fi
-        rm -rf "\(backup.path)"
-        rm -rf "\(newBundle.deletingLastPathComponent().deletingLastPathComponent().path)"
-        open "\(target.path)"
-        """
+    private func writeInstallScript(newBundle: URL, target: URL,
+                                    version: String) throws -> URL {
+        // The staging directory is named rather than derived from the bundle's
+        // path: `rm -rf` on a computed parent is one wrong assumption away
+        // from deleting something that was never ours.
+        let staging = newBundle.deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let script = UpdateInstaller.script(
+            pid: ProcessInfo.processInfo.processIdentifier,
+            newBundle: newBundle,
+            target: target,
+            logPath: UpdateInstaller.logPath,
+            expectedVersion: version,
+            staging: staging.lastPathComponent.hasPrefix("VeilUpdate-") ? staging : nil)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("veil-install-\(UUID().uuidString).sh")
         try script.write(to: url, atomically: true, encoding: .utf8)
@@ -413,29 +457,23 @@ final class UpdateChecker {
     }
 }
 
-/// Reports bytes as they arrive for one download task.
-///
-/// `URLSession` calls this off the main actor, so the closure hops back itself
-/// rather than making the delegate `@MainActor`.
-private final class DownloadObserver: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    private let onProgress: @Sendable (Int64, Int64) -> Void
-
-    init(onProgress: @escaping @Sendable (Int64, Int64) -> Void) {
-        self.onProgress = onProgress
+/// Keeps the transfer rate across callbacks that arrive off the main actor.
+private final class RateMeter: @unchecked Sendable {
+    struct Reading {
+        var bytesPerSecond: Double?
+        var secondsRemaining: TimeInterval?
     }
 
-    func urlSession(_ session: URLSession,
-                    downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64,
-                    totalBytesWritten: Int64,
-                    totalBytesExpectedToWrite: Int64) {
-        onProgress(totalBytesWritten, totalBytesExpectedToWrite)
-    }
+    private let lock = NSLock()
+    private var rate = TransferRate()
 
-    /// Required by the protocol; the async `download(from:delegate:)` hands the
-    /// file back through its return value, so nothing is needed here.
-    func urlSession(_ session: URLSession,
-                    downloadTask: URLSessionDownloadTask,
-                    didFinishDownloadingTo location: URL) {}
+    func read(received: Int64, total: Int64) -> Reading {
+        lock.lock(); defer { lock.unlock() }
+        let speed = rate.record(received: received,
+                                at: Date().timeIntervalSinceReferenceDate)
+        return Reading(bytesPerSecond: speed,
+                       secondsRemaining: rate.secondsRemaining(received: received,
+                                                               total: total))
+    }
 }
 #endif
