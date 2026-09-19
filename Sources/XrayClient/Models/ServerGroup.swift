@@ -56,6 +56,24 @@ struct ServerGroup: Codable, Equatable, Identifiable {
 
     var tag: String { ProfileTags.group(id) }
 
+    /// The group as one connectable entry: something a list can show and a
+    /// user can click.
+    ///
+    /// The group's own id and name carry the identity — that id is what makes
+    /// the profile connect to the group rather than to a node. The first member
+    /// lends its connection details, because the path that predates profiles
+    /// still dials a single server, and the rest ride along as `alternates` so
+    /// the row renders as the balancer it is. Nil when nothing it names is
+    /// left in `servers`.
+    func representative(in servers: [ProxyConfig]) -> ProxyConfig? {
+        let members = memberIDs.compactMap { id in servers.first { $0.id == id } }
+        guard var first = members.first else { return nil }
+        first.id = id
+        first.name = name
+        first.alternates = Array(members.dropFirst())
+        return first
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, name, kind, memberIDs, selectedID, testURL, interval
         case tolerance, interruptExistingConnections

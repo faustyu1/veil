@@ -8,6 +8,17 @@ struct Subscription: Codable, Identifiable, Equatable {
     var name: String
     var url: String?               // nil for the manual/local group
     var servers: [ProxyConfig] = []
+    /// Groups this subscription's panel declared in its config, over
+    /// `servers`. Refreshed with the node list and never merged with the
+    /// user's own groups: the panel owns these, the user owns those.
+    ///
+    /// Optional so that stores written by older builds still decode — the
+    /// whole file is read with one `try?`, so a key a 1.6.3 store cannot
+    /// contain would empty every subscription on upgrade.
+    var groups: [ServerGroup]?
+
+    /// The declared groups, or none.
+    var declaredGroups: [ServerGroup] { groups ?? [] }
     var lastUpdated: Date?
     var autoUpdate: Bool = true
     var isCollapsed: Bool = false

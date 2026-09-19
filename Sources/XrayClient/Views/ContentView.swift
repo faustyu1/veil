@@ -470,9 +470,20 @@ struct SubscriptionGroupView: View {
                                   pinger: pinger)
     }
 
+    /// The groups this subscription's panel declared, each as one row.
+    ///
+    /// They sit above the nodes because that is what the provider means them
+    /// to be: the entry you pick, with the individual servers underneath for
+    /// anyone who wants to choose by hand.
+    private var visibleGroups: [ProxyConfig] {
+        let rows = subscription.declaredGroups.compactMap { store.representative(for: $0) }
+        guard !searchText.isEmpty else { return rows }
+        return rows.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
     /// Hide groups entirely filtered out by an active search/alive filter.
     private var isHidden: Bool {
-        (!searchText.isEmpty || aliveOnly) && visibleServers.isEmpty
+        (!searchText.isEmpty || aliveOnly) && visibleServers.isEmpty && visibleGroups.isEmpty
     }
 
     var body: some View {
@@ -482,6 +493,32 @@ struct SubscriptionGroupView: View {
             VStack(alignment: .leading, spacing: 0) {
                 groupHeader
                 if !subscription.isCollapsed {
+                    ForEach(visibleGroups) { group in
+                        ServerRow(
+                            server: group,
+                            isSelected: store.selectedServerID == group.id,
+                            isActive: connection.activeServerID == group.id,
+                            latency: nil,
+                            isTesting: false
+                        )
+                        .contentShape(Rectangle())
+                        .id(group.id)
+                        .onTapGesture { if !selectionMode { handleTap(group) } }
+                        .contextMenu {
+                            Button(connection.isConnected ? loc("Switch here") : loc("Connect")) {
+                                store.select(group.id); connection.connect(to: group)
+                            }
+                            // No latency of its own: the group is whichever
+                            // member the core finds quickest, so the useful
+                            // measurement is the members'.
+                            Button(loc("Test ping")) {
+                                let members = subscription.declaredGroups
+                                    .first { $0.id == group.id }?.memberIDs ?? []
+                                pinger.test(store.allServers.filter { members.contains($0.id) },
+                                            tunActive: connection.mode == .tun && connection.isConnected)
+                            }
+                        }
+                    }
                     ForEach(visibleServers) { server in
                         let isActive = connection.activeServerID == server.id
                         let isLocked = isActive && connection.isConnected

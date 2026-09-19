@@ -6,6 +6,20 @@ import Foundation
 /// emit a real Xray/sing-box balancer instead of many separate outbounds.
 enum BalancerGrouper {
 
+    /// Applies the heuristic to a fetched body, but only where nothing better
+    /// is on offer.
+    ///
+    /// A config document declares its balancers, and guessing over a
+    /// declaration is how a provider's deliberate grouping turns into whatever
+    /// their node names happen to look like. Share links declare nothing, so
+    /// there the guess is all there is.
+    static func applied(to payload: SubscriptionPayload) -> SubscriptionPayload {
+        guard !payload.format.isFullConfig else { return payload }
+        var grouped = payload
+        grouped.servers = group(payload.servers)
+        return grouped
+    }
+
     /// Groups servers by normalized name, protocol and auth key. Servers that do
     /// not share a bucket are returned unchanged.
     static func group(_ servers: [ProxyConfig]) -> [ProxyConfig] {

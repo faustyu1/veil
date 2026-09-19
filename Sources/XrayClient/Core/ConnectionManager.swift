@@ -52,6 +52,8 @@ final class ConnectionManager {
     /// server — it is built from the whole list, the groups and the rules.
     var settings = AppSettings()
     var allServers: [ProxyConfig] = []
+    /// Groups the subscriptions' panels declared, alongside the user's own.
+    var subscriptionGroups: [ServerGroup] = []
 
     /// The store this connection reads its profile from. Held weakly and
     /// re-read on every connect, so a rule edited in a sheet takes effect on
@@ -148,6 +150,7 @@ final class ConnectionManager {
     func applyStore(_ store: ServerStore) {
         settings = store.settings
         allServers = store.allServers
+        subscriptionGroups = store.declaredGroups
         mode = store.settings.mode
         logLevel = store.settings.logLevel
         ports.socks = store.settings.socksPort
@@ -283,11 +286,18 @@ final class ConnectionManager {
     /// processes the profile turns out to need.
     private func renderProfile(for server: ProxyConfig) throws -> Data {
         var input = ProfileAssembler.Input()
-        input.servers = allServers.contains { $0.id == server.id } ? allServers : allServers + [server]
+        // A group's representative is not a node: its id names the group, and
+        // appending it would emit a second outbound for the member it borrowed
+        // its address from.
+        let namesAGroup = subscriptionGroups.contains { $0.id == server.id }
+            || settings.serverGroups.contains { $0.id == server.id }
+        let known = namesAGroup || allServers.contains { $0.id == server.id }
+        input.servers = known ? allServers : allServers + [server]
         input.settings = settings
         input.activeServerID = server.id
         input.ports = ports
         input.includeTun = (mode == .tun)
+        input.subscriptionGroups = subscriptionGroups
         input.clashSecret = controlSecret
         // In TUN mode the helper picks the cache path itself — it will not open
         // a filename this side chose.
