@@ -41,6 +41,12 @@ struct RoutingSheet: View {
     /// sidebar decides which one is on screen.
     var pane: Tab
 
+    /// Spelled out because `geo` is private, which makes the memberwise
+    /// initialiser private too — the settings window lives in another file.
+    init(pane: Tab) {
+        self.pane = pane
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             content(pane)
