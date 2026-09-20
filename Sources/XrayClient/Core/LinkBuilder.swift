@@ -105,6 +105,9 @@ enum LinkBuilder {
         if let pub = cfg.peerPublicKey { q["publickey"] = pub }
         if let addr = cfg.localAddresses { q["address"] = addr.joined(separator: ",") }
         if let psk = cfg.presharedKey { q["presharedkey"] = psk }
+        if let allowed = cfg.allowedIPs, !allowed.isEmpty {
+            q["allowedips"] = allowed.joined(separator: ",")
+        }
         if let mtu = cfg.mtu { q["mtu"] = String(mtu) }
         if let r = cfg.reserved { q["reserved"] = r.map(String.init).joined(separator: ",") }
         return assemble(scheme: "wireguard", user: cfg.privateKey, host: cfg.address,

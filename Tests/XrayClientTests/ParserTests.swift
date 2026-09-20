@@ -155,6 +155,32 @@ final class LinkParserTests: XCTestCase {
         XCTAssertEqual(cfg?.privateKey, "privkeybase64")
         XCTAssertEqual(cfg?.peerPublicKey, "pubkeybase64")
         XCTAssertEqual(cfg?.localAddresses, ["10.0.0.3/32"])
+        XCTAssertEqual(cfg?.allowedIPs, ["0.0.0.0/0"])
+    }
+
+    /// A peer handed out for one private network is the whole reason to keep
+    /// `AllowedIPs`: pinning it to `0.0.0.0/0` would make the node a full
+    /// tunnel nobody asked for.
+    func testWireGuardConfKeepsNarrowAllowedIPs() {
+        let conf = """
+        [Interface]
+        PrivateKey = privkeybase64
+        Address = 172.16.4.2/32
+        [Peer]
+        PublicKey = pubkeybase64
+        Endpoint = 5.6.7.8:51820
+        AllowedIPs = 172.16.4.0/24, 10.8.0.0/16
+        """
+        let cfg = LinkParser.parseWireGuardConf(conf, name: "office")
+        XCTAssertEqual(cfg?.allowedIPs, ["172.16.4.0/24", "10.8.0.0/16"])
+    }
+
+    func testWireGuardURICarriesAllowedIPs() throws {
+        let link = "wireguard://cHJpdg@h.com:51820?publickey=cHVi&address=10.0.0.2/32&allowedips=172.16.4.0/24#WG"
+        let cfg = try LinkParser.parse(link)
+        XCTAssertEqual(cfg.allowedIPs, ["172.16.4.0/24"])
+        let rebuilt = try LinkParser.parse(LinkBuilder.link(for: cfg))
+        XCTAssertEqual(rebuilt.allowedIPs, ["172.16.4.0/24"])
     }
 
     func testEngineRouting() {
@@ -369,6 +395,8 @@ final class SingBoxConfigBuilderTests: XCTestCase {
         XCTAssertEqual(ep["private_key"] as? String, "priv")
         XCTAssertEqual(ep["mtu"] as? Int, 1408)
         let peer = (ep["peers"] as! [[String: Any]])[0]
+        // Nothing said otherwise, so the peer carries everything.
+        XCTAssertEqual(peer["allowed_ips"] as? [String], ["0.0.0.0/0", "::/0"])
         XCTAssertEqual(peer["public_key"] as? String, "pub")
         XCTAssertEqual(peer["address"] as? String, "h.com")
         XCTAssertEqual(peer["port"] as? Int, 51820)

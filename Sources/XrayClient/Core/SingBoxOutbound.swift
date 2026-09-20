@@ -83,7 +83,7 @@ enum SingBoxOutbound {
             "address": cfg.address,
             "port": cfg.port,
             "public_key": cfg.peerPublicKey ?? "",
-            "allowed_ips": ["0.0.0.0/0", "::/0"]
+            "allowed_ips": cfg.effectiveAllowedIPs
         ]
         if let psk = cfg.presharedKey, !psk.isEmpty { peer["pre_shared_key"] = psk }
         if let reserved = cfg.reserved, reserved.count == 3 { peer["reserved"] = reserved }

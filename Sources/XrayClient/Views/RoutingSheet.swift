@@ -50,7 +50,7 @@ struct RoutingSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             content(pane)
-            if connection.isConnected {
+            if connection.isConnected && connection.hasUnappliedRouting(store.settings) {
                 Divider()
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.clockwise.circle")

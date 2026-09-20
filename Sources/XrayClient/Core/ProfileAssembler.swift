@@ -81,9 +81,33 @@ enum ProfileAssembler {
             if !input.settings.ipv6Enabled {
                 tun.address = tun.address.filter { !$0.contains(":") }
             }
+            tun.routeExcludeAddress = openedExcludes(tun.routeExcludeAddress,
+                                                     for: profile.rules)
             profile.tun = tun
         }
         return profile
+    }
+
+    /// Drops the excluded ranges a rule wants routed.
+    ///
+    /// `route_exclude_address` keeps the LAN off the tunnel by installing
+    /// routes around it, so a packet to a private address never reaches the
+    /// core — and a rule saying "172.16.4.10 goes through the WireGuard peer"
+    /// silently does nothing, because the core is never asked. Opening the
+    /// whole covering block is what makes the rule work: the traffic enters
+    /// the tunnel, the rule picks it up, and the preset's LAN bypass still
+    /// sends the rest of that block straight back out.
+    static func openedExcludes(_ excludes: [String],
+                               for rules: [RoutingRule]) -> [String] {
+        let claimed = rules
+            .filter { $0.enabled && $0.target != .direct && $0.target != .block }
+            .flatMap(\.destinationCIDRs)
+            .compactMap(IPRange.init)
+        guard !claimed.isEmpty else { return excludes }
+        return excludes.filter { entry in
+            guard let range = IPRange(entry) else { return true }
+            return !claimed.contains { range.overlaps($0) }
+        }
     }
 
     /// Servers in this profile that have to be fronted by a child Xray.

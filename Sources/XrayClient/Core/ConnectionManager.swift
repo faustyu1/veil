@@ -41,6 +41,13 @@ final class ConnectionManager {
     var ports = InboundPorts()
     /// The ordered routing rules to apply on the next (re)connect.
     var routingRules: [RoutingRule] = []
+    /// The routing the core that is actually running was built from.
+    ///
+    /// Only a difference against this means anything: "changes apply on the
+    /// next reconnect" is a statement about the live configuration, and
+    /// showing it merely because a connection exists tells the user a change
+    /// is pending every time they open the routing panes.
+    private(set) var appliedRouting: RoutingFingerprint?
     /// Xray core log verbosity.
     var logLevel: LogLevel = .warning
 
@@ -127,11 +134,19 @@ final class ConnectionManager {
 
     var isConnected: Bool { state == .connected }
 
+    /// True when the routing has been edited since the running core was
+    /// started, so a reconnect would change where traffic goes.
+    func hasUnappliedRouting(_ settings: AppSettings) -> Bool {
+        guard let appliedRouting else { return false }
+        return appliedRouting != settings.routingFingerprint
+    }
+
     /// Connect to a server. If already connected, switches by restarting only
     /// xray and re-pinning the route — the transport (TUN/proxy) stays up, so a
     /// switch is sub-second and never re-prompts for a password.
     func connect(to server: ProxyConfig, forceTransportRefresh: Bool = false) {
         if let store { applyStore(store) }
+        appliedRouting = settings.routingFingerprint
         if ConnectionManager.usesProfile(mode: mode, useNativeTun: settings.useNativeTun) {
             connectWithProfile(to: server, forceTransportRefresh: forceTransportRefresh)
         } else {
@@ -285,6 +300,9 @@ final class ConnectionManager {
         if !isReconnecting { logs = ""; pendingLog = "" }
         activeServerName = server.name
         appendLog("[info] \(keepTransport ? "switching to" : "starting") \(server.name) (\(mode.title), sing-box)\n")
+        if !server.carriesEverything {
+            appendLog("[warn] \(server.name) only carries \(server.effectiveAllowedIPs.joined(separator: ", ")) — it is a route to one network, not a way out. Point a rule at it and connect to a server that carries everything.\n")
+        }
         if mode == .tun && !settings.dns.enabled {
             appendLog("[warn] DNS handling is off: names are resolved by the network's own resolver, so domains it blocks stay broken inside the tunnel\n")
         }
@@ -516,6 +534,7 @@ final class ConnectionManager {
         xray.stop()
         activeUsedProfile = false
         activeServerID = nil
+        appliedRouting = nil
         state = .disconnected
         stopUptime()
         appendLog("[info] disconnected\n")

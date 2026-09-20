@@ -89,7 +89,7 @@ enum NodeRepresentation {
         if let key = server.peerPublicKey { lines.append("PublicKey = \(key)") }
         if let psk = server.presharedKey { lines.append("PresharedKey = \(psk)") }
         lines.append("Endpoint = \(server.address):\(server.port)")
-        lines.append("AllowedIPs = 0.0.0.0/0, ::/0")
+        lines.append("AllowedIPs = \(server.effectiveAllowedIPs.joined(separator: ", "))")
         return lines.joined(separator: "\n")
     }
 

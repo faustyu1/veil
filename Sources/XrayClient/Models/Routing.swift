@@ -189,6 +189,27 @@ struct RoutingRule: Codable, Equatable, Identifiable {
         !processNames.isEmpty || !processPaths.isEmpty
     }
 
+    /// True when the rule names the destinations it is about — addresses or
+    /// domains typed out rather than an application whose traffic happens to
+    /// go wherever it goes.
+    ///
+    /// This is the difference that decides whether the preset's LAN bypass
+    /// gets to outrank the rule. "Everything Slack sends" must not swallow
+    /// Slack's LAN traffic, so the bypass wins there. "192.168.8.0/24 through
+    /// this peer" *is* a statement about the LAN, and a bypass that outranked
+    /// it would make the rule do nothing at all.
+    var namesItsOwnDestinations: Bool {
+        direction == .destination && (!domains.isEmpty || !ips.isEmpty)
+    }
+
+    /// The plain address blocks this rule matches on, written out — a
+    /// `geoip:` or `ext:` entry names a database rather than a range, so it is
+    /// left out.
+    var destinationCIDRs: [String] {
+        guard direction == .destination else { return [] }
+        return ips.filter { !$0.hasPrefix("geoip:") && !$0.hasPrefix("ext:") }
+    }
+
     /// Renders to an Xray routing "field" rule, or nil when Xray cannot express
     /// it. Process matchers have no Xray equivalent, so such rules are dropped
     /// there instead of being silently widened.

@@ -243,10 +243,50 @@ struct AppSettings: Codable, Equatable {
         // wanting one application on a particular server is no reason to give
         // up the preset's bypasses. They sit between the guards, which have to
         // win, and the preset's country rules, which must not.
-        routingPreset.guardRules(blockAds: blockAds)
-            + customRules
+        //
+        // With one exception, and it is the whole point of writing a rule by
+        // hand: a rule that spells out the addresses or domains it is about
+        // goes ahead of the guards. The LAN bypass exists to stop an
+        // application rule from dragging the printer through the tunnel — it
+        // was never meant to overrule "send 172.16.4.10 through this peer",
+        // which is a sentence about the LAN and nothing else.
+        let addressed = customRules.filter(\.namesItsOwnDestinations)
+        let rest = customRules.filter { !$0.namesItsOwnDestinations }
+        return addressed
+            + routingPreset.guardRules(blockAds: blockAds)
+            + rest
             + CommunityListManager.rules(for: self)
             + routingPreset.presetRules()
     }
+
+    /// The parts of the settings the running core was built from.
+    ///
+    /// Everything else — the appearance, the update interval, where the log
+    /// pane sits — can change without the tunnel caring. Comparing this
+    /// against what the live connection started with is what says whether a
+    /// reconnect would actually change anything, rather than announcing one
+    /// every time the routing panes are opened.
+    var routingFingerprint: RoutingFingerprint {
+        RoutingFingerprint(preset: routingPreset,
+                           blockAds: blockAds,
+                           customRules: customRules,
+                           serverGroups: serverGroups,
+                           ruleSets: ruleSets,
+                           communityLists: communityLists,
+                           communityListTarget: communityListTarget,
+                           dns: dns)
+    }
+}
+
+/// What a routing edit can change about the configuration the core is running.
+struct RoutingFingerprint: Equatable {
+    var preset: RoutingPreset
+    var blockAds: Bool
+    var customRules: [RoutingRule]
+    var serverGroups: [ServerGroup]
+    var ruleSets: [RuleSetRef]
+    var communityLists: [String]
+    var communityListTarget: RuleTarget
+    var dns: DNSSettings
 }
 

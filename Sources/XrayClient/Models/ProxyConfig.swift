@@ -94,8 +94,33 @@ struct ProxyConfig: Codable, Identifiable, Equatable {
     var peerPublicKey: String?     // wireguard peer public key (base64)
     var presharedKey: String?      // optional wireguard PSK
     var localAddresses: [String]?  // interface addresses, e.g. ["10.0.0.2/32"]
+    /// Destinations this peer is allowed to carry, the `AllowedIPs` of a
+    /// `wg-quick` file. Nil means the whole internet (`0.0.0.0/0`, `::/0`),
+    /// which is what a full-tunnel peer is handed out as. A narrower list is
+    /// what makes a WireGuard node usable as a *side* tunnel: the peer only
+    /// accepts the prefixes it was given, so routing rules can send those few
+    /// addresses through it while everything else keeps using the main proxy.
+    var allowedIPs: [String]?
     var mtu: Int?
     var reserved: [Int]?           // wireguard reserved bytes (3 ints)
+
+    /// `allowedIPs` with the full-tunnel default filled in, so callers never
+    /// have to decide what an absent list means.
+    var effectiveAllowedIPs: [String] {
+        let cleaned = (allowedIPs ?? [])
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return cleaned.isEmpty ? ["0.0.0.0/0", "::/0"] : cleaned
+    }
+
+    /// True when this node can carry arbitrary traffic. A WireGuard peer whose
+    /// `AllowedIPs` name a few prefixes cannot: it is a route to one network,
+    /// and connecting to it as *the* proxy leaves everything else with nowhere
+    /// to go.
+    var carriesEverything: Bool {
+        guard proto == .wireguard else { return true }
+        return effectiveAllowedIPs.contains { $0 == "0.0.0.0/0" || $0 == "::/0" }
+    }
 
     /// Optional alternate nodes for the same logical server (client-side
     /// balancer). When set, connecting uses any of these nodes according to the

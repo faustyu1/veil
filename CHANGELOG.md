@@ -3,6 +3,35 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] — 2026-09-20
+
+### Added
+
+- WireGuard nodes keep their own `AllowedIPs`. The config editor wrote
+  `0.0.0.0/0, ::/0` over whatever the peer was handed out with, so a peer that
+  only reaches one private network became a full tunnel every time its config
+  was opened. The list is parsed from a `wg-quick` paste, a `wireguard://`
+  link and an outbound JSON block, shown as it stands, and passed to the core.
+
+### Fixed
+
+- A rule that names its own addresses or domains now outranks the preset's LAN
+  bypass. The bypass exists so that a rule about an *application* does not drag
+  that application's LAN traffic through the tunnel; it was also outranking
+  "send 172.16.4.10 through this peer", which is a sentence about the LAN and
+  nothing else, and which therefore did nothing at all.
+- The TUN interface no longer routes around a private range a rule claims.
+  `route_exclude_address` kept those packets off the tunnel entirely, so the
+  core was never asked where they should go. The covering block opens up when a
+  rule sends part of it somewhere other than direct; the rest of the block
+  still goes straight out.
+- A WireGuard endpoint pasted or shown as outbound JSON is read back. The
+  1.11+ shape states the remote in its peer rather than at the top level, so
+  the editor refused its own output.
+- "Changes apply on the next connect or reconnect" is shown only when the
+  routing actually differs from what the running core was started with, not
+  whenever the panes are opened while connected.
+
 ## [1.8.0] — 2026-09-19
 
 ### Added
@@ -403,5 +432,6 @@ TUN helper once** — Settings → TUN Helper → Install. The old install put a
   looked like a button that does nothing. Both run off the main thread now, the
   row shows progress, and failures are shown.
 
+[1.9.0]: https://github.com/faustyu1/veil/releases/tag/v1.9.0
 [1.4.1]: https://github.com/faustyu1/veil/releases/tag/v1.4.1
 [1.4.0]: https://github.com/faustyu1/veil/releases/tag/v1.4.0

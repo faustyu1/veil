@@ -50,6 +50,44 @@ final class NodeRepresentationTests: XCTestCase {
         XCTAssertEqual(parsed.privateKey, node.privateKey)
         XCTAssertEqual(parsed.peerPublicKey, node.peerPublicKey)
         XCTAssertEqual(parsed.localAddresses, node.localAddresses)
+        XCTAssertEqual(parsed.allowedIPs, ["0.0.0.0/0", "::/0"])
+    }
+
+    /// The editor used to write `AllowedIPs = 0.0.0.0/0, ::/0` no matter what
+    /// the node said, so narrowing a peer to one private network was undone
+    /// the moment its config was opened.
+    func testAWireGuardConfShowsAndKeepsItsOwnAllowedIPs() throws {
+        var node = wireguard()
+        node.allowedIPs = ["172.16.4.0/24"]
+
+        let text = NodeRepresentation.text(.wireguard, for: node)
+        XCTAssertTrue(text.contains("AllowedIPs = 172.16.4.0/24"), text)
+
+        let parsed = try NodeRepresentation.parse(.wireguard, text: text, keeping: node)
+        XCTAssertEqual(parsed.allowedIPs, ["172.16.4.0/24"])
+    }
+
+    func testTheOutboundJSONCarriesAllowedIPsBothWays() throws {
+        var node = wireguard()
+        node.allowedIPs = ["172.16.4.0/24"]
+
+        let text = NodeRepresentation.text(.json, for: node)
+        XCTAssertTrue(text.contains("172.16.4.0/24"), text)
+
+        let parsed = try NodeRepresentation.parse(.json, text: text, keeping: node)
+        XCTAssertEqual(parsed.allowedIPs, ["172.16.4.0/24"])
+    }
+
+    func testEditingAllowedIPsReachesTheOutbound() throws {
+        let node = wireguard()
+        let text = NodeRepresentation.text(.wireguard, for: node)
+            .replacingOccurrences(of: "AllowedIPs = 0.0.0.0/0, ::/0",
+                                  with: "AllowedIPs = 172.16.4.0/24")
+
+        let parsed = try NodeRepresentation.parse(.wireguard, text: text, keeping: node)
+        let endpoint = SingBoxOutbound.endpoint(parsed, tag: "wg")
+        let peer = (endpoint["peers"] as! [[String: Any]])[0]
+        XCTAssertEqual(peer["allowed_ips"] as? [String], ["172.16.4.0/24"])
     }
 
     func testAnEditIsWhatTakesEffect() throws {

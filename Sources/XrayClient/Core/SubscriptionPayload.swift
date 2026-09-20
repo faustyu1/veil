@@ -340,9 +340,20 @@ enum SubscriptionPayloadParser {
         for outbound in outbounds {
             guard let type = outbound["type"] as? String else { continue }
             guard let proto = protocolNamed(type) else { continue }
-            guard let address = (outbound["server"] as? String) ?? firstLocalAddress(outbound),
+            // A WireGuard endpoint (sing-box 1.11+) states the remote in its
+            // peer, not at the top level: `server`/`server_port` are absent and
+            // `address` is the *local* interface. Reading it like any other
+            // outbound dropped the node on the floor — which is what the node
+            // editor's JSON pane was doing with its own output.
+            let peer = (outbound["peers"] as? [[String: Any]])?.first
+            let peerAddress = proto == .wireguard ? peer?["address"] as? String : nil
+            guard let address = (outbound["server"] as? String)
+                    ?? peerAddress
+                    ?? firstLocalAddress(outbound),
                   !address.isEmpty else { continue }
-            let port = intValue(outbound["server_port"]) ?? defaultPort(proto)
+            let port = intValue(outbound["server_port"])
+                ?? (proto == .wireguard ? intValue(peer?["port"]) : nil)
+                ?? defaultPort(proto)
             let tag = (outbound["tag"] as? String) ?? type
 
             var config = ProxyConfig(name: tag, proto: proto, address: address, port: port)
@@ -365,13 +376,15 @@ enum SubscriptionPayloadParser {
                 config.localAddresses = outbound["address"] as? [String]
                     ?? outbound["local_address"] as? [String]
                 config.mtu = intValue(outbound["mtu"])
-                if let peer = (outbound["peers"] as? [[String: Any]])?.first {
+                if let peer {
                     config.peerPublicKey = nonEmpty(peer["public_key"] as? String)
                     config.presharedKey = nonEmpty(peer["pre_shared_key"] as? String)
+                    config.allowedIPs = peer["allowed_ips"] as? [String]
                     config.reserved = peer["reserved"] as? [Int]
                 } else {
                     config.peerPublicKey = nonEmpty(outbound["peer_public_key"] as? String)
                     config.presharedKey = nonEmpty(outbound["pre_shared_key"] as? String)
+                    config.allowedIPs = outbound["allowed_ips"] as? [String]
                     config.reserved = outbound["reserved"] as? [Int]
                 }
             }

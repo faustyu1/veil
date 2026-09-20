@@ -288,6 +288,9 @@ enum LinkParser {
                 $0.trimmingCharacters(in: .whitespaces)
             }
         }
+        if let allowed = (q["allowedips"] ?? q["allowed_ips"])?.removingPercentEncoding {
+            cfg.allowedIPs = splitList(allowed)
+        }
         if let mtu = q["mtu"] { cfg.mtu = Int(mtu) }
         if let reserved = q["reserved"]?.removingPercentEncoding {
             let parts = reserved.split(separator: ",").compactMap {
@@ -306,6 +309,7 @@ enum LinkParser {
         var mtu: Int?
         var peerPublicKey: String?
         var presharedKey: String?
+        var allowedIPs: [String] = []
         var endpointHost: String?
         var endpointPort: Int?
 
@@ -320,6 +324,7 @@ enum LinkParser {
             case "mtu":          mtu = Int(value)
             case "publickey":    peerPublicKey = value
             case "presharedkey": presharedKey = value
+            case "allowedips":   allowedIPs = splitList(value)
             case "endpoint":
                 let (h, p) = splitHostPort(value)
                 endpointHost = h; endpointPort = p
@@ -336,11 +341,21 @@ enum LinkParser {
         cfg.peerPublicKey = peerPublicKey
         cfg.presharedKey = presharedKey
         cfg.localAddresses = addresses.isEmpty ? nil : addresses
+        cfg.allowedIPs = allowedIPs.isEmpty ? nil : allowedIPs
         cfg.mtu = mtu
         return cfg
     }
 
     // MARK: - Shared helpers
+
+    /// Splits a comma-separated list, dropping blanks. `AllowedIPs` and
+    /// `Address` are both written this way.
+    private static func splitList(_ value: String) -> [String] {
+        value.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
     private static func applyTransport(_ cfg: inout ProxyConfig, query q: [String: String]) {
         if let net = q["type"] ?? q["net"] {
             cfg.network = TransportNetwork(rawValue: net) ?? .tcp
