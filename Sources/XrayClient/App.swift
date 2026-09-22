@@ -79,6 +79,8 @@ struct XrayClientApp: App {
         }
         control.sync(settings: store.settings, store: store, connection: connection)
         appDelegate.closeToTray = store.settings.closeToTray
+        appDelegate.dockHidden = store.settings.hideDockIcon
+        DockIcon.setHidden(store.settings.hideDockIcon)
         appDelegate.connection = connection
         // Keep the login-item registration in sync with the setting.
         LoginItem.setEnabled(store.settings.launchAtLogin)
@@ -206,11 +208,16 @@ private struct VeilCommands: Commands {
 /// network is never left routed through a dead tun2socks.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var closeToTray = true
+    /// Mirrors `AppSettings.hideDockIcon`. With no Dock tile the menu bar is
+    /// the only way back in, so quitting on the last closed window would leave
+    /// the user with a tunnel they cannot reach — stay alive regardless of
+    /// close-to-tray.
+    var dockHidden = false
     weak var connection: ConnectionManager?
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         // Keep running in the menu bar when close-to-tray is enabled.
-        return !closeToTray
+        return !(closeToTray || dockHidden)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

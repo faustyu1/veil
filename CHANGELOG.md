@@ -3,6 +3,32 @@
 All notable changes to Veil are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] — 2026-09-22
+
+### Added
+
+- A "Hide the Dock icon" setting under Settings › General › Window. Veil then
+  runs from the menu bar alone — no Dock tile, no ⌘-Tab entry — and keeps
+  running when the window is closed, whatever close-to-tray says, since the
+  menu bar item is the only way back to it. The switch takes effect at once,
+  without a relaunch.
+
+### Fixed
+
+- Credentials in a share link are percent-decoded once, not twice. A password
+  containing `%40` arrived as one containing `@`, and one ending in a bare `%`
+  decoded to nothing and was dropped — in both cases the node authenticated as
+  somebody else, or not at all. Applies to VLESS, Trojan, Hysteria2, TUIC,
+  AnyTLS and WireGuard.
+- A Hysteria2 link that carries its auth string in the query — `auth`,
+  `auth_str`, `auth-str` or `password` — is read instead of being treated as a
+  node with no password.
+- A node with no credential is named as such when it is checked, instead of
+  being handed to the core. A Hysteria2 server answers an empty password with
+  its masquerade page, which sing-box reports as "authentication failed, status
+  code: 404" — a message about the far end for a link that never carried a
+  password.
+
 ## [1.9.0] — 2026-09-20
 
 ### Added

@@ -52,7 +52,7 @@ enum LinkParser {
 
     private static func parseVLESS(_ line: String) throws -> ProxyConfig {
         guard let comps = URLComponents(string: line),
-              let uuid = comps.user,
+              let uuid = credential(comps.percentEncodedUser),
               let host = comps.host,
               let port = comps.port else {
             throw LinkParseError.malformed(line)
@@ -105,14 +105,14 @@ enum LinkParser {
 
     private static func parseTrojan(_ line: String) throws -> ProxyConfig {
         guard let comps = URLComponents(string: line),
-              let pwd = comps.user,
+              let pwd = credential(comps.percentEncodedUser),
               let host = comps.host,
               let port = comps.port else {
             throw LinkParseError.malformed(line)
         }
         var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
                               proto: .trojan, address: host, port: port)
-        cfg.password = pwd.removingPercentEncoding ?? pwd
+        cfg.password = pwd
         let q = queryDict(comps)
         applyTransport(&cfg, query: q)
         // Trojan defaults to TLS unless explicitly told otherwise.
@@ -178,11 +178,14 @@ enum LinkParser {
         }
         var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
                               proto: .hysteria2, address: host, port: port)
-        // The userinfo carries the auth password (may be percent-encoded).
-        if let user = comps.user {
-            cfg.password = user.removingPercentEncoding ?? user
-        }
         let q = queryDict(comps)
+        // The userinfo carries the auth string. Some panels put it in the
+        // query instead, and a few write `hysteria2://@host` with nothing in
+        // front of the `@` at all — a node whose auth the panel never filled
+        // in, which the server answers with its masquerade page rather than a
+        // recognisable rejection.
+        cfg.password = credential(comps.percentEncodedUser)
+            ?? q["auth"] ?? q["auth_str"] ?? q["auth-str"] ?? q["password"]
         cfg.security = .tls
         cfg.sni = q["sni"] ?? q["peer"]
         cfg.allowInsecure = (q["insecure"] == "1" || q["insecure"] == "true")
@@ -211,10 +214,8 @@ enum LinkParser {
         var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
                               proto: .tuic, address: host, port: port)
         // userinfo = uuid:password
-        cfg.uuid = comps.user?.removingPercentEncoding ?? comps.user
-        if let pwd = comps.password {
-            cfg.password = pwd.removingPercentEncoding ?? pwd
-        }
+        cfg.uuid = credential(comps.percentEncodedUser)
+        cfg.password = credential(comps.percentEncodedPassword)
         let q = queryDict(comps)
         cfg.security = .tls
         cfg.sni = q["sni"] ?? q["peer"]
@@ -241,13 +242,9 @@ enum LinkParser {
         }
         var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
                               proto: .anytls, address: host, port: port)
-        if let user = comps.user {
-            cfg.password = user.removingPercentEncoding ?? user
-        }
         // Some share formats put the password in the password slot instead.
-        if cfg.password == nil, let pwd = comps.password {
-            cfg.password = pwd.removingPercentEncoding ?? pwd
-        }
+        cfg.password = credential(comps.percentEncodedUser)
+            ?? credential(comps.percentEncodedPassword)
         let q = queryDict(comps)
         cfg.security = .tls
         cfg.sni = q["sni"] ?? q["peer"] ?? q["host"]
@@ -276,13 +273,11 @@ enum LinkParser {
         var cfg = ProxyConfig(name: fragmentName(comps) ?? host,
                               proto: .wireguard, address: host, port: port)
         // userinfo carries the local private key.
-        if let user = comps.user {
-            cfg.privateKey = (user.removingPercentEncoding ?? user)
-        }
         let q = queryDict(comps)
-        cfg.privateKey = cfg.privateKey ?? (q["privatekey"] ?? q["secretkey"])?.removingPercentEncoding
-        cfg.peerPublicKey = (q["publickey"] ?? q["public_key"] ?? q["peer_public_key"])?.removingPercentEncoding
-        cfg.presharedKey = (q["presharedkey"] ?? q["pre_shared_key"])?.removingPercentEncoding
+        cfg.privateKey = credential(comps.percentEncodedUser)
+            ?? q["privatekey"] ?? q["secretkey"]
+        cfg.peerPublicKey = q["publickey"] ?? q["public_key"] ?? q["peer_public_key"]
+        cfg.presharedKey = q["presharedkey"] ?? q["pre_shared_key"]
         if let addr = (q["address"] ?? q["ip"])?.removingPercentEncoding {
             cfg.localAddresses = addr.split(separator: ",").map {
                 $0.trimmingCharacters(in: .whitespaces)
@@ -396,6 +391,22 @@ enum LinkParser {
         cfg.publicKey = q["pbk"]
         cfg.shortId = q["sid"]
         cfg.spiderX = q["spx"]?.removingPercentEncoding
+    }
+
+    /// A credential out of the link's userinfo, percent-decoded exactly once.
+    ///
+    /// `URLComponents.user` and `.password` are already decoded, so the
+    /// `comps.user.removingPercentEncoding` this replaces decoded twice: a
+    /// password that really contains `%40` arrived as one containing `@`, and
+    /// one ending in a bare `%` decoded to nil and was dropped. Empty userinfo
+    /// — `hysteria2://@host:port`, which is what a panel writes for a node
+    /// whose auth string it never filled in — reads as no credential rather
+    /// than as an empty one, so the node can be reported as incomplete
+    /// instead of failing authentication at the far end.
+    private static func credential(_ percentEncoded: String?) -> String? {
+        guard let percentEncoded, !percentEncoded.isEmpty else { return nil }
+        let decoded = percentEncoded.removingPercentEncoding ?? percentEncoded
+        return decoded.isEmpty ? nil : decoded
     }
 
     private static func queryDict(_ comps: URLComponents) -> [String: String] {

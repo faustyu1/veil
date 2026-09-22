@@ -53,15 +53,12 @@ struct MenuBarContent: View {
 
         Divider()
         Button(loc("Open Window")) {
-            NSApp.setActivationPolicy(.regular)
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: "main")
+            // Never force `.regular` here: someone who asked for no Dock icon
+            // must not get one back by opening the window.
+            DockIcon.setHidden(store.settings.hideDockIcon)
+            openWindow(id: WindowID.main)
             // Bring the (possibly recreated) window to the front.
-            DispatchQueue.main.async {
-                for window in NSApp.windows where window.canBecomeMain {
-                    window.makeKeyAndOrderFront(nil)
-                }
-            }
+            DispatchQueue.main.async { DockIcon.activate() }
         }
         Button(loc("Quit Veil")) {
             connection.disconnect()
