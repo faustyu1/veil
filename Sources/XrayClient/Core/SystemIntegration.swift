@@ -2,7 +2,40 @@ import Foundation
 import UserNotifications
 
 #if os(macOS)
+import AppKit
 import ServiceManagement
+
+/// Whether Veil appears in the Dock and the ⌘-Tab switcher.
+///
+/// `.accessory` is the same thing `LSUIElement` buys at launch, except it can
+/// be flipped while the app runs. An accessory app keeps its menu bar item and
+/// can still show windows — it just stops owning a Dock tile, and stops being
+/// the app whose menus sit at the top of the screen, so a window it opens has
+/// to be raised explicitly.
+@MainActor
+enum DockIcon {
+
+    /// Applies the policy. Showing the icon re-activates the app, otherwise
+    /// the returning Dock tile belongs to an app that is not in front.
+    static func setHidden(_ hidden: Bool) {
+        let wanted: NSApplication.ActivationPolicy = hidden ? .accessory : .regular
+        guard NSApp.activationPolicy() != wanted else { return }
+        NSApp.setActivationPolicy(wanted)
+        if !hidden { NSApp.activate(ignoringOtherApps: true) }
+    }
+
+    /// Raises the app's windows whatever the current policy is.
+    ///
+    /// Under `.accessory` `openWindow` alone leaves the window behind whatever
+    /// the user was looking at, because the app never becomes frontmost on its
+    /// own.
+    static func activate() {
+        NSApp.activate(ignoringOtherApps: true)
+        for window in NSApp.windows where window.canBecomeMain {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+}
 
 /// Manages the "launch at login" state via the modern SMAppService API
 /// (macOS 13+). Registering adds the app as a login item; unregistering removes

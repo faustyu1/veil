@@ -70,6 +70,10 @@ struct AppSettings: Codable, Equatable {
         return (presets + [current]).sorted()
     }
     var closeToTray: Bool = true            // red button hides to menu bar
+    /// Keep Veil out of the Dock and the ⌘-Tab switcher, running from the menu
+    /// bar alone. Flipping it swaps the activation policy live, so it takes
+    /// effect without a relaunch.
+    var hideDockIcon: Bool = false
     var socksPort: Int = 10808
     var httpPort: Int = 10809
     var lastSelectedServerID: UUID?
@@ -186,6 +190,7 @@ struct AppSettings: Codable, Equatable {
         autoUpdateSubscriptions = get(.autoUpdateSubscriptions, true)
         autoUpdateIntervalHours = get(.autoUpdateIntervalHours, 12)
         closeToTray = get(.closeToTray, true)
+        hideDockIcon = get(.hideDockIcon, false)
         socksPort = get(.socksPort, 10808)
         httpPort = get(.httpPort, 10809)
         lastSelectedServerID = try? c.decode(UUID.self, forKey: .lastSelectedServerID)

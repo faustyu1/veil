@@ -441,6 +441,53 @@ final class LinkBuilderTests: XCTestCase {
         XCTAssertTrue(cfg.allowInsecure)
     }
 
+    /// A password is percent-decoded exactly once.
+    ///
+    /// `URLComponents.user` hands back a decoded string already, so decoding it
+    /// a second time turned a password that really contains `%40` into one
+    /// containing `@` and authenticated as somebody else — or, when it ended in
+    /// a bare `%`, decoded to nil and was dropped entirely.
+    func testCredentialsAreDecodedOnce() throws {
+        for password in ["p%40ss", "100%", "with/slash+plus=eq", "a:b@c"] {
+            var cfg = ProxyConfig(name: "N", proto: .hysteria2, address: "h.com", port: 443)
+            cfg.password = password
+            let back = try LinkParser.parse(LinkBuilder.link(for: cfg))
+            XCTAssertEqual(back.password, password)
+        }
+    }
+
+    /// The delimiters inside a credential are encoded by the builder itself.
+    ///
+    /// Foundation's own `URLComponents.user` setter does not agree with itself
+    /// across macOS versions about `:` and `@`, and a link where they survive
+    /// raw splits at the wrong place when it is read back.
+    func testUserinfoDelimitersAreEncodedInTheLink() {
+        var cfg = ProxyConfig(name: "N", proto: .hysteria2, address: "h.com", port: 443)
+        cfg.password = "a:b@c"
+        let link = LinkBuilder.link(for: cfg)
+        let userinfo = link.dropFirst("hysteria2://".count).prefix { $0 != "@" }
+        XCTAssertEqual(String(userinfo), "a%3Ab%40c")
+    }
+
+    /// `hysteria2://@host:port` — a panel writing a node whose auth string it
+    /// never filled in. The empty userinfo is no password, not a password that
+    /// happens to be "", so the node can be reported as incomplete rather than
+    /// failing authentication at the server.
+    func testHysteria2WithEmptyUserinfoHasNoPassword() throws {
+        let cfg = try LinkParser.parse("hysteria2://@37.0.0.1:30555?sni=a.example#N")
+        XCTAssertNil(cfg.password)
+        XCTAssertEqual(cfg.address, "37.0.0.1")
+        XCTAssertEqual(cfg.port, 30555)
+    }
+
+    /// Some panels put the auth string in the query instead of the userinfo.
+    func testHysteria2AuthFromQuery() throws {
+        for key in ["auth", "auth_str", "auth-str", "password"] {
+            let cfg = try LinkParser.parse("hysteria2://h.com:443?\(key)=s3cr3t&sni=a.example#N")
+            XCTAssertEqual(cfg.password, "s3cr3t", "query key \(key)")
+        }
+    }
+
     func testTUICRoundTrip() throws {
         let link = "tuic://uuid-1:pw@h.com:443?sni=cf.com&congestion_control=bbr&udp_relay_mode=native#T"
         let cfg = try roundTrip(link)

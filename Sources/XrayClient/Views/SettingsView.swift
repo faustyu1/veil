@@ -184,6 +184,14 @@ struct SettingsView: View {
         Section(loc("Window")) {
             Toggle(loc("Close button hides to menu bar"), isOn: $store.settings.closeToTray)
                 .onChange(of: store.settings.closeToTray) { _, _ in store.save() }
+            Toggle(isOn: $store.settings.hideDockIcon) {
+                HintLabel(loc("Hide the Dock icon"), loc("Runs Veil from the menu bar alone: no Dock tile, no ⌘-Tab entry, no menus at the top of the screen. The window stays reachable through Open Window in the menu bar item, and the app keeps running when you close it."))
+            }
+            .onChange(of: store.settings.hideDockIcon) { _, on in
+                DockIcon.setHidden(on)
+                (NSApp.delegate as? AppDelegate)?.dockHidden = on
+                store.save()
+            }
             Toggle(loc("Launch at login"), isOn: $store.settings.launchAtLogin)
                 .onChange(of: store.settings.launchAtLogin) { _, on in
                     LoginItem.setEnabled(on); store.save()

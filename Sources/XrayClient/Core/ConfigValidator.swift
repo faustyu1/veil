@@ -19,6 +19,14 @@ enum ConfigValidator {
     }
 
     static func check(_ server: ProxyConfig) async -> Outcome {
+        // The cores do not mind a node with no credential in it: sing-box will
+        // happily dial a Hysteria2 server with an empty password, and the
+        // server answers with its masquerade page, which the core reports as
+        // "authentication failed, status code: 404" — a message about the far
+        // end when the problem is a link that never carried an auth string.
+        // Say so here instead.
+        if let missing = missingCredential(server) { return .failed(missing) }
+
         let engine = server.engine
         guard let binary = CoreBinary.locate(for: engine) else { return .unavailable }
 
@@ -50,6 +58,25 @@ enum ConfigValidator {
             ? ["check", "-c", file.path]
             : ["run", "-test", "-config", file.path]
         return await run(binary, arguments)
+    }
+
+    /// The credential this protocol cannot connect without, when it is absent.
+    static func missingCredential(_ server: ProxyConfig) -> String? {
+        func blank(_ value: String?) -> Bool {
+            (value ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        switch server.proto {
+        case .vless, .vmess:
+            return blank(server.uuid) ? "This node has no UUID." : nil
+        case .trojan, .shadowsocks, .hysteria2, .anytls:
+            return blank(server.password) ? "This node has no password." : nil
+        case .tuic:
+            if blank(server.uuid) { return "This node has no UUID." }
+            return blank(server.password) ? "This node has no password." : nil
+        case .wireguard:
+            if blank(server.privateKey) { return "This node has no private key." }
+            return blank(server.peerPublicKey) ? "This node has no peer public key." : nil
+        }
     }
 
     private static func run(_ binary: URL, _ arguments: [String]) async -> Outcome {
