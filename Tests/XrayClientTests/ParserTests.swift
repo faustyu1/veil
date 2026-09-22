@@ -456,6 +456,19 @@ final class LinkBuilderTests: XCTestCase {
         }
     }
 
+    /// The delimiters inside a credential are encoded by the builder itself.
+    ///
+    /// Foundation's own `URLComponents.user` setter does not agree with itself
+    /// across macOS versions about `:` and `@`, and a link where they survive
+    /// raw splits at the wrong place when it is read back.
+    func testUserinfoDelimitersAreEncodedInTheLink() {
+        var cfg = ProxyConfig(name: "N", proto: .hysteria2, address: "h.com", port: 443)
+        cfg.password = "a:b@c"
+        let link = LinkBuilder.link(for: cfg)
+        let userinfo = link.dropFirst("hysteria2://".count).prefix { $0 != "@" }
+        XCTAssertEqual(String(userinfo), "a%3Ab%40c")
+    }
+
     /// `hysteria2://@host:port` — a panel writing a node whose auth string it
     /// never filled in. The empty userinfo is no password, not a password that
     /// happens to be "", so the node can be reported as incomplete rather than

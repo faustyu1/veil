@@ -20,6 +20,10 @@ All notable changes to Veil are recorded here. Versions follow
   decoded to nothing and was dropped — in both cases the node authenticated as
   somebody else, or not at all. Applies to VLESS, Trojan, Hysteria2, TUIC,
   AnyTLS and WireGuard.
+- The builder percent-encodes `:` and `@` inside a credential itself. Leaving
+  that to `URLComponents` produced a link that split in a different place on
+  macOS 26 than on 15, so an exported password containing either delimiter came
+  back truncated.
 - A Hysteria2 link that carries its auth string in the query — `auth`,
   `auth_str`, `auth-str` or `password` — is read instead of being treated as a
   node with no password.

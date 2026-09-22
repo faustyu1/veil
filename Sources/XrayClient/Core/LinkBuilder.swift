@@ -141,8 +141,10 @@ enum LinkBuilder {
         comps.host = host
         comps.port = port
         if let user, !user.isEmpty {
-            comps.user = user
-            if let password, !password.isEmpty { comps.password = password }
+            comps.percentEncodedUser = encodeUserinfo(user)
+            if let password, !password.isEmpty {
+                comps.percentEncodedPassword = encodeUserinfo(password)
+            }
         }
         if !query.isEmpty {
             comps.queryItems = query.sorted { $0.key < $1.key }
@@ -151,6 +153,20 @@ enum LinkBuilder {
         var s = comps.string ?? "\(scheme)://\(host):\(port)"
         s += fragment(name)
         return s
+    }
+
+    /// Percent-encodes one half of the userinfo.
+    ///
+    /// `URLComponents.user` leaves the delimiters that hold the link together
+    /// to the Foundation version it runs on: a password containing `:` or `@`
+    /// came back whole on one macOS and truncated at the first delimiter on
+    /// the next, because the link it wrote no longer split where it was meant
+    /// to. Encoding them here is what makes the round trip the same
+    /// everywhere.
+    private static func encodeUserinfo(_ value: String) -> String {
+        var allowed = CharacterSet.urlUserAllowed
+        allowed.remove(charactersIn: ":@/?#[]%")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     private static func fragment(_ name: String) -> String {
